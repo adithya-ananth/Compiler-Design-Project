@@ -1,3 +1,8 @@
+/**
+ * ir.c - Three-address code IR implementation
+ * Temp/label generation, instruction creation, printing.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,7 +13,7 @@
 static int temp_counter = 0;
 static int label_counter = 0;
 
-// Temp and label generation
+/* --- Temp and label generation --- */
 char* ir_new_temp(void) {
     char *buf = malloc(16);
     snprintf(buf, 16, "t%d", temp_counter++);
@@ -26,7 +31,7 @@ void ir_reset_temps(void) {
     label_counter = 0;
 }
 
-// Operand helpers
+/* --- Operand helpers --- */
 IROperand ir_op_name(char *name) {
     IROperand op = {0};
     op.name = name ? strdup(name) : NULL;
@@ -42,14 +47,14 @@ IROperand ir_op_const(int val) {
     return op;
 }
 
-// Deep-copy operand to avoid double-free
+/* Deep-copy operand for storage in instruction (avoids double-free) */
 static IROperand op_dup(IROperand *op) {
     IROperand c = *op;
     if (op->name) c.name = strdup(op->name);
     return c;
 }
 
-// Map AST binop to IR relop
+/* Map AST binop token to IR relop for conditional jumps */
 IRRelop ast_relop_to_ir(int ast_op) {
     switch (ast_op) {
         case '<':  return IR_LT;
@@ -62,7 +67,7 @@ IRRelop ast_relop_to_ir(int ast_op) {
     }
 }
 
-// Instruction creation
+/* --- Instruction creation --- */
 IRInstr* ir_make_assign(char *dst, IROperand src, int line) {
     IRInstr *i = calloc(1, sizeof(IRInstr));
     i->kind = IR_ASSIGN;
@@ -165,7 +170,7 @@ IRInstr* ir_make_if(IROperand left, IROperand right, IRRelop relop, char *label,
     return i;
 }
 
-// List management
+/* --- List management --- */
 void ir_append(IRInstr **head, IRInstr *instr) {
     if (!instr) return;
     instr->next = NULL;
@@ -186,7 +191,7 @@ void ir_append_list(IRInstr **head, IRInstr *list) {
     *head = list;
 }
 
-// Program management
+/* --- Program --- */
 IRProgram* ir_program_create(void) {
     return calloc(1, sizeof(IRProgram));
 }
@@ -204,11 +209,8 @@ IRFunc* ir_func_create(char *name, DataType ret_type) {
     f->instrs = NULL;
     return f;
 }
-// #####################################
-// FOLLOWING CODE IS FOR PRINTING AND CLEANUP, NOT CORE TO IR STRUCTURE OR GENERATION
 
-
-// Print helpers
+/* --- Print operand --- */
 static void print_operand(IROperand *op) {
     if (op->is_const)
         printf("%d", op->const_val);
@@ -249,7 +251,7 @@ static const char* relop_str(IRRelop r) {
     }
 }
 
-// Output functions
+/* --- Output --- */
 void ir_print_instr(IRInstr *instr) {
     if (!instr) return;
     switch (instr->kind) {
@@ -393,7 +395,7 @@ void ir_export_to_file(IRProgram *prog, const char *filename) {
     fclose(f);
 }
 
-// Cleanup functions
+/* --- Cleanup --- */
 void ir_free_operand(IROperand *op) {
     if (op->name) free(op->name);
 }

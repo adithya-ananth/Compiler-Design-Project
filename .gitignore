@@ -1,21 +1,6 @@
-# Executables and Objects
-# Results of the build process parser
-*.o
+# Build directory
+build/
 
-# Flex Generated Files
-# Generated from the .l file
-lex.yy.c
-
-# Bison/Yacc Generated Files
-# Generated from the .y file (parser.y)
-*.tab.c
-*.tab.h
-y.tab.c
-y.tab.h
-*.output
-
-# Project Specific Artifacts
-# Metadata and visualization files
+# Outputs
 *.dot
 ir.txt
-proposal.pdf

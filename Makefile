@@ -1,41 +1,43 @@
 CC = gcc
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -I./src
 BISON = bison
 FLEX = flex
 
-OBJS = y.tab.o lex.yy.o ast.o symbol_table.o semantic.o ir.o ir_gen.o
+SRC_DIR = src
+BUILD_DIR = build
 
-all: parser
+# Object files to generate
+OBJS = $(BUILD_DIR)/y.tab.o \
+       $(BUILD_DIR)/lex.yy.o \
+       $(BUILD_DIR)/ast.o \
+       $(BUILD_DIR)/symbol_table.o \
+       $(BUILD_DIR)/semantic.o \
+       $(BUILD_DIR)/ir.o \
+       $(BUILD_DIR)/ir_gen.o
+
+all: setup parser
+
+# Ensure build directory exists
+setup:
+	@mkdir -p $(BUILD_DIR)
 
 parser: $(OBJS)
-	$(CC) $(CFLAGS) -DYYDEBUG=1 -o parser $(OBJS)
+	$(CC) $(CFLAGS) -DYYDEBUG=1 -o $(BUILD_DIR)/parser $(OBJS)
 
-y.tab.c y.tab.h: parser.y
-	$(BISON) -t -d -o y.tab.c parser.y
+$(BUILD_DIR)/y.tab.c $(BUILD_DIR)/y.tab.h: $(SRC_DIR)/parser.y
+	$(BISON) -t -d -o $(BUILD_DIR)/y.tab.c $(SRC_DIR)/parser.y
 
-lex.yy.c: lexer.l y.tab.h
-	$(FLEX) lexer.l
+$(BUILD_DIR)/lex.yy.c: $(SRC_DIR)/lexer.l $(BUILD_DIR)/y.tab.h
+	$(FLEX) -o $(BUILD_DIR)/lex.yy.c $(SRC_DIR)/lexer.l
 
-y.tab.o: y.tab.c
-	$(CC) $(CFLAGS) -c y.tab.c
+$(BUILD_DIR)/y.tab.o: $(BUILD_DIR)/y.tab.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-lex.yy.o: lex.yy.c
-	$(CC) $(CFLAGS) -c lex.yy.c
+$(BUILD_DIR)/lex.yy.o: $(BUILD_DIR)/lex.yy.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-ast.o: ast.c ast.h
-	$(CC) $(CFLAGS) -c ast.c
-
-symbol_table.o: symbol_table.c symbol_table.h
-	$(CC) $(CFLAGS) -c symbol_table.c
-
-semantic.o: semantic.c semantic.h symbol_table.h ast.h
-	$(CC) $(CFLAGS) -c semantic.c
-
-ir.o: ir.c ir.h symbol_table.h ast.h
-	$(CC) $(CFLAGS) -c ir.c
-
-ir_gen.o: ir_gen.c ir_gen.h ir.h ast.h symbol_table.h
-	$(CC) $(CFLAGS) -c ir_gen.c
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f parser *.o y.tab.c y.tab.h lex.yy.c ast.dot ir.txt
+	rm -rf $(BUILD_DIR) ast.dot ir.txt

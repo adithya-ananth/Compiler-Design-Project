@@ -1,9 +1,9 @@
 #!/bin/bash
 # Week 4: IR - parse a file and get its IR, or run validation tests
 
-PARSER=./parser
+cd "$(dirname "$0")/.."
+PARSER=./build/parser
 
-cd "$(dirname "$0")"
 make -q parser 2>/dev/null || make parser
 
 if [ -n "$1" ]; then
