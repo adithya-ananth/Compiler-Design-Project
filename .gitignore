@@ -19,3 +19,10 @@ y.tab.h
 *.dot
 ir.txt
 proposal.pdf
+
+# Build directory
+build/
+
+# Outputs
+ast.dot
+ir.txt
