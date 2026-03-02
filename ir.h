@@ -1,80 +1,63 @@
-/**
- * ir.h - Three-address code IR for C-subset compiler
- * Week 4: Intermediate Representation (machine-independent)
- *
- * Format: each instruction has at most 3 addresses (result, op1, op2).
- * Supports arithmetic, control flow, and function calls.
- */
-
 #ifndef IR_H
 #define IR_H
 
 #include "symbol_table.h"
 
-/* --- IR instruction kinds --- */
+// IR instruction types
 typedef enum {
-    IR_ASSIGN,      /* x := y (copy) */
-    IR_BINOP,       /* x := y op z */
-    IR_UNOP,        /* x := op y */
-    IR_PARAM,       /* param x */
-    IR_CALL,        /* x := call fn, n  (or call fn, n for void) */
-    IR_RETURN,      /* return x  (or return for void) */
-    IR_LABEL,       /* L1: */
-    IR_GOTO,        /* goto L1 */
-    IR_IF           /* if x relop y goto L1 */
+    IR_ASSIGN,      
+    IR_BINOP,       
+    IR_UNOP,        
+    IR_PARAM,       
+    IR_CALL,        
+    IR_RETURN,      
+    IR_LABEL,       
+    IR_GOTO,        
+    IR_IF           
 } IROpKind;
 
-/* Relational operators for IR_IF */
+// Relational operators
 typedef enum {
     IR_LT, IR_GT, IR_LE, IR_GE, IR_EQ, IR_NE
 } IRRelop;
 
-/* Map AST binop token to IRRelop (for IR_IF) */
 IRRelop ast_relop_to_ir(int ast_op);
 
-/* Operand: either a named value (var/temp) or integer constant */
+// Var/temp or integer constant
 typedef struct IROperand {
-    char *name;     /* variable or temp name (e.g. "x", "t1") */
-    int const_val;  /* if name is NULL, this holds integer literal */
-    int is_const;   /* 1 if operand is constant */
+    char *name;     
+    int const_val;  
+    int is_const;   
 } IROperand;
 
-/* Single three-address instruction */
+// Three-address instruction node
 typedef struct IRInstr {
     IROpKind kind;
-    int line;       /* source line for debugging */
+    int line;       
 
-    /* For IR_ASSIGN, IR_BINOP, IR_UNOP: result location */
-    char *result;
+    char *result;   // For ASSIGN, BINOP, UNOP
+    IROperand src;  // For ASSIGN
 
-    /* For IR_ASSIGN: source */
-    IROperand src;
-
-    /* For IR_BINOP: left, right, operator token */
-    IROperand left;
+    IROperand left; // For BINOP
     IROperand right;
-    int binop;      /* '+', '-', '*', '/', '%', T_AND, T_OR, etc. */
+    int binop;      
 
-    /* For IR_UNOP: operand and operator */
-    IROperand unop_src;
-    int unop;       /* '-', '!' */
+    IROperand unop_src; // For UNOP
+    int unop;       
 
-    /* For IR_CALL: function name, arg count */
-    char *call_fn;
+    char *call_fn;  // For CALL
     int arg_count;
 
-    /* For IR_LABEL, IR_GOTO, IR_IF: label */
-    char *label;
+    char *label;    // For LABEL, GOTO, IF
 
-    /* For IR_IF: condition operands and relop */
-    IROperand if_left;
+    IROperand if_left; // For IF
     IROperand if_right;
     IRRelop relop;
 
     struct IRInstr *next;
 } IRInstr;
 
-/* Function-level IR: list of instructions with function name */
+// Function instruction list
 typedef struct IRFunc {
     char *name;
     DataType ret_type;
@@ -82,18 +65,18 @@ typedef struct IRFunc {
     struct IRFunc *next;
 } IRFunc;
 
-/* Program IR: list of functions (incl. global decls as init code) */
+// Full program IR
 typedef struct {
     IRFunc *funcs;
-    IRInstr *global_instrs;  /* global var initializers, if any */
+    IRInstr *global_instrs;  
 } IRProgram;
 
-/* --- Temp and label generation --- */
+// Generators
 char* ir_new_temp(void);
 char* ir_new_label(void);
 void ir_reset_temps(void);
 
-/* --- Instruction creation --- */
+// Instruction factories
 IRInstr* ir_make_assign(char *dst, IROperand src, int line);
 IRInstr* ir_make_binop(char *dst, IROperand left, IROperand right, int op, int line);
 IRInstr* ir_make_unop(char *dst, IROperand src, int op, int line);
@@ -106,29 +89,29 @@ IRInstr* ir_make_label(char *label, int line);
 IRInstr* ir_make_goto(char *label, int line);
 IRInstr* ir_make_if(IROperand left, IROperand right, IRRelop relop, char *label, int line);
 
-/* --- Operand helpers --- */
+// Helpers
 IROperand ir_op_name(char *name);
 IROperand ir_op_const(int val);
 
-/* --- List management --- */
+// List management
 void ir_append(IRInstr **head, IRInstr *instr);
 void ir_append_list(IRInstr **head, IRInstr *list);
 
-/* --- Program --- */
+// Program management
 IRProgram* ir_program_create(void);
 void ir_program_add_func(IRProgram *prog, IRFunc *f);
 IRFunc* ir_func_create(char *name, DataType ret_type);
 
-/* --- Output --- */
+// Printing and Export
 void ir_print_instr(IRInstr *instr);
 void ir_print_func(IRFunc *f);
 void ir_print_program(IRProgram *prog);
 void ir_export_to_file(IRProgram *prog, const char *filename);
 
-/* --- Cleanup --- */
+// Memory cleanup
 void ir_free_operand(IROperand *op);
 void ir_free_instr(IRInstr *instr);
 void ir_free_func(IRFunc *f);
 void ir_free_program(IRProgram *prog);
 
-#endif /* IR_H */
+#endif

@@ -1,8 +1,3 @@
-/**
- * ir_gen.c - AST to three-address IR generation
- * Walks the AST and emits linear three-address instructions.
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,16 +6,16 @@
 #include "ir_gen.h"
 #include "y.tab.h"
 
-/* Generate code for condition; jump to true_label if true, else false_label */
+// jump tp true lael if true else null
 static void gen_cond(ASTNode *node, IRInstr **list, char *true_label, char *false_label, int line);
 
-/* Generate code for expression; returns operand holding the result */
+// generate code for expression, return operand with result
 static IROperand gen_expr(ASTNode *node, IRInstr **list);
 
-/* Generate code for statement */
+
 static void gen_stmt(ASTNode *node, IRInstr **list);
 
-/* --- Condition generation (for if/while/for) --- */
+// if, for, while, return, assign, block
 static void gen_cond(ASTNode *node, IRInstr **list, char *true_label, char *false_label, int line) {
     if (!node) {
         ir_append(list, ir_make_goto(true_label, line));
@@ -111,7 +106,7 @@ static void gen_cond(ASTNode *node, IRInstr **list, char *true_label, char *fals
     }
 }
 
-/* --- Expression generation --- */
+// exprn
 static IROperand gen_expr(ASTNode *node, IRInstr **list) {
     if (!node) return ir_op_const(0);
 
@@ -231,7 +226,7 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
     }
 }
 
-/* --- Statement generation --- */
+// stmt
 static void gen_stmt(ASTNode *node, IRInstr **list) {
     if (!node) return;
 
