@@ -25,6 +25,9 @@ const char* node_type_to_string(NodeType type) {
         case NODE_FUNC_CALL: return "FUNC_CALL";
         case NODE_TYPE: return "TYPE";
         case NODE_STR_LIT: return "STRING";
+        case NODE_SWITCH: return "SWITCH";
+        case NODE_CASE: return "CASE";
+        case NODE_BREAK: return "BREAK";
         default: return "UNKNOWN";
     }
 }
@@ -254,6 +257,30 @@ ASTNode* create_func_def(ASTNode *ret_type, char *name, ASTNode *params, ASTNode
     return node;
 }
 
+ASTNode* create_switch_node(ASTNode *cond, ASTNode *cases) {
+    ASTNode *node = create_node(NODE_SWITCH);
+    node->cond = cond;
+    node->body = cases;   // list of NODE_CASE via next
+
+    if (cond) cond->next = NULL;
+
+    return node;
+}
+
+ASTNode* create_case_node(ASTNode *expr, ASTNode *body) {
+    ASTNode *node = create_node(NODE_CASE);
+    node->left = expr;   // constant expression or NULL for default
+    node->body = body;   // list of statements via next
+
+    if (expr) expr->next = NULL;
+
+    return node;
+}
+
+ASTNode* create_break_node(void) {
+    return create_node(NODE_BREAK);
+}
+
 void append_node(ASTNode *head, ASTNode *new_node) {
     if (!head || !new_node) return;
 
@@ -364,6 +391,27 @@ void print_ast(ASTNode *node, int level) {
             break;
         case NODE_TYPE:
             printf("Type (token %d)\n", node->int_val);
+            break;
+        case NODE_SWITCH:
+            printf("Switch\n");
+            print_indent(level + 1); printf("Cond:\n");
+            print_ast(node->cond, level + 2);
+            print_indent(level + 1); printf("Cases:\n");
+            print_ast(node->body, level + 2);
+            break;
+        case NODE_CASE:
+            if (node->left) {
+                printf("Case\n");
+                print_indent(level + 1); printf("Expr:\n");
+                print_ast(node->left, level + 2);
+            } else {
+                printf("Default\n");
+            }
+            print_indent(level + 1); printf("Body:\n");
+            print_ast(node->body, level + 2);
+            break;
+        case NODE_BREAK:
+            printf("Break\n");
             break;
         default:
             printf("Unknown Node\n");

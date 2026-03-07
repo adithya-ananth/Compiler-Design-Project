@@ -20,6 +20,26 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list);
 /* Generate code for statement */
 static void gen_stmt(ASTNode *node, IRInstr **list);
 
+/* Break target stack for loops and switches */
+#define MAX_BREAK_DEPTH 64
+static char *break_label_stack[MAX_BREAK_DEPTH];
+static int break_label_top = 0;
+
+static void push_break_label(const char *label) {
+    if (break_label_top >= MAX_BREAK_DEPTH) return;
+    break_label_stack[break_label_top++] = strdup(label);
+}
+
+static void pop_break_label(void) {
+    if (break_label_top <= 0) return;
+    free(break_label_stack[--break_label_top]);
+}
+
+static const char *current_break_label(void) {
+    if (break_label_top <= 0) return NULL;
+    return break_label_stack[break_label_top - 1];
+}
+
 /* --- Condition generation (for if/while/for) --- */
 static void gen_cond(ASTNode *node, IRInstr **list, char *true_label, char *false_label, int line) {
     if (!node) {
@@ -273,7 +293,9 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             ir_append(list, ir_make_label(L_cond, line));
             gen_cond(node->cond, list, L_body, L_end, line);
             ir_append(list, ir_make_label(L_body, line));
+            push_break_label(L_end);
             gen_stmt(node->body, list);
+            pop_break_label();
             ir_append(list, ir_make_goto(L_cond, line));
             ir_append(list, ir_make_label(L_end, line));
             free(L_cond);
@@ -294,13 +316,91 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             else
                 ir_append(list, ir_make_goto(L_body, line));
             ir_append(list, ir_make_label(L_body, line));
+            push_break_label(L_end);
             gen_stmt(node->body, list);
+            pop_break_label();
             if (node->incr)
                 (void)gen_expr(node->incr, list);
             ir_append(list, ir_make_goto(L_cond, line));
             ir_append(list, ir_make_label(L_end, line));
             free(L_cond);
             free(L_body);
+            free(L_end);
+            break;
+        }
+
+        case NODE_SWITCH: {
+            if (!node->cond || !node->body) {
+                if (node->cond) {
+                    (void)gen_expr(node->cond, list);
+                }
+                break;
+            }
+
+            /* Collect cases and labels */
+            int count = 0;
+            for (ASTNode *c = node->body; c; c = c->next) {
+                count++;
+            }
+            if (count == 0) {
+                (void)gen_expr(node->cond, list);
+                break;
+            }
+
+            ASTNode **cases = (ASTNode **)malloc(sizeof(ASTNode *) * count);
+            char **labels = (char **)malloc(sizeof(char *) * count);
+            int idx = 0;
+            int default_index = -1;
+            for (ASTNode *c = node->body; c; c = c->next) {
+                cases[idx] = c;
+                labels[idx] = ir_new_label();
+                if (c->type == NODE_CASE && c->left == NULL && default_index == -1) {
+                    default_index = idx;
+                }
+                idx++;
+            }
+
+            char *L_end = ir_new_label();
+
+            /* Dispatch on discriminant */
+            IROperand discr = gen_expr(node->cond, list);
+            for (int i = 0; i < count; i++) {
+                ASTNode *c = cases[i];
+                if (c->type == NODE_CASE && c->left) {
+                    int v = c->left->int_val;
+                    IROperand cv = ir_op_const(v);
+                    ir_append(list, ir_make_if(discr, cv, IR_EQ, labels[i], line));
+                }
+            }
+
+            if (default_index >= 0) {
+                ir_append(list, ir_make_goto(labels[default_index], line));
+            } else {
+                ir_append(list, ir_make_goto(L_end, line));
+            }
+
+            if (discr.name) free(discr.name);
+
+            /* Emit case bodies with fallthrough */
+            push_break_label(L_end);
+            for (int i = 0; i < count; i++) {
+                ASTNode *c = cases[i];
+                ir_append(list, ir_make_label(labels[i], c->line_number));
+                if (c->type == NODE_CASE && c->body) {
+                    for (ASTNode *s = c->body; s; s = s->next) {
+                        gen_stmt(s, list);
+                    }
+                }
+            }
+            pop_break_label();
+
+            ir_append(list, ir_make_label(L_end, line));
+
+            for (int i = 0; i < count; i++) {
+                free(labels[i]);
+            }
+            free(labels);
+            free(cases);
             free(L_end);
             break;
         }
@@ -313,6 +413,14 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             } else
                 ir_append(list, ir_make_return(line));
             break;
+
+        case NODE_BREAK: {
+            const char *lbl = current_break_label();
+            if (lbl) {
+                ir_append(list, ir_make_goto((char *)lbl, line));
+            }
+            break;
+        }
 
         case NODE_ASSIGN:
             (void)gen_expr(node, list);

@@ -6,6 +6,7 @@
 
 static Symbol *current_function = NULL;
 int semantic_errors = 0;
+static int break_context_depth = 0;
 
 void semantic_error(int line, const char *msg) {
     printf("Semantic Error (line %d): %s\n", line, msg);
@@ -290,7 +291,9 @@ int analyze_while(ASTNode *node) {
                    "Invalid condition type");
 
 
+    break_context_depth++;
     analyze_node(node->body);
+    break_context_depth--;
 
     return 0;
 
@@ -312,7 +315,73 @@ int analyze_for(ASTNode *node) {
     if (node->incr)
         analyze_node(node->incr);
 
+    break_context_depth++;
     analyze_node(node->body);
+    break_context_depth--;
+
+    return 0;
+}
+
+int analyze_switch(ASTNode *node) {
+
+    if (node->cond) {
+        analyze_node(node->cond);
+        if (node->cond->data_type != TYPE_INT &&
+            node->cond->data_type != TYPE_CHAR) {
+            semantic_error(node->line_number,
+                           "Switch expression must be of type int or char");
+        }
+    }
+
+    break_context_depth++;
+
+    int has_default = 0;
+
+    for (ASTNode *c = node->body; c; c = c->next) {
+        if (!c) continue;
+
+        if (c->type != NODE_CASE) {
+            analyze_node(c);
+            continue;
+        }
+
+        if (c->left) {
+            ASTNode *expr = c->left;
+            analyze_node(expr);
+
+            if (expr->type != NODE_CONST_INT &&
+                expr->type != NODE_CONST_CHAR) {
+                semantic_error(c->line_number,
+                               "Case label must be constant int or char");
+            } else {
+                /* Check for duplicate case values */
+                for (ASTNode *prev = node->body; prev != c; prev = prev->next) {
+                    if (prev->type == NODE_CASE && prev->left &&
+                        (prev->left->type == NODE_CONST_INT ||
+                         prev->left->type == NODE_CONST_CHAR)) {
+                        if (prev->left->int_val == expr->int_val) {
+                            semantic_error(c->line_number,
+                                           "Duplicate case label in switch");
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            if (has_default) {
+                semantic_error(c->line_number,
+                               "Multiple default labels in switch");
+            }
+            has_default = 1;
+        }
+
+        /* Analyze statements in the case body */
+        if (c->body) {
+            analyze_list(c->body);
+        }
+    }
+
+    break_context_depth--;
 
     return 0;
 }
@@ -343,8 +412,17 @@ int analyze_node(ASTNode *node) {
         case NODE_FOR:
             return analyze_for(node);
 
+        case NODE_SWITCH:
+            return analyze_switch(node);
+
         case NODE_RETURN:
             return analyze_return(node);
+        case NODE_BREAK:
+            if (break_context_depth <= 0) {
+                semantic_error(node->line_number,
+                               "break statement not within loop or switch");
+            }
+            return 0;
 
         case NODE_ASSIGN:
             analyze_assignment(node);

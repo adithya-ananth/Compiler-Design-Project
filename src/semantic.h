@@ -34,4 +34,6 @@ int analyze_while(ASTNode *node);
 
 int analyze_for(ASTNode* node);
 
+int analyze_switch(ASTNode *node);
+
 #endif

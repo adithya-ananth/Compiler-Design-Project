@@ -32,7 +32,7 @@ ASTNode *root = NULL;
 
 /* Tokens */
 %token <intval> T_INT T_VOID T_CHAR
-%token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN
+%token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK
 %token <str>    T_IDENT T_STRING_LIT
 %token <intval> T_NUMBER T_CHAR_LIT
 
@@ -57,6 +57,8 @@ ASTNode *root = NULL;
 %type <node> declaration declarator_list declarator type_specifier
 %type <node> statement compound_statement block_item_list block_item
 %type <node> expression_statement selection_statement iteration_statement jump_statement
+%type <node> switch_statement switch_clause_list switch_clause
+%type <node> statement_list statement_list_opt
 %type <node> expression assignment_expression logical_or_expression logical_and_expression
 %type <node> equality_expression relational_expression additive_expression
 %type <node> multiplicative_expression unary_expression primary_expression
@@ -168,6 +170,7 @@ statement
     | selection_statement { $$ = $1; }
     | iteration_statement { $$ = $1; }
     | jump_statement { $$ = $1; }
+    | switch_statement { $$ = $1; }
     ;
 
 compound_statement
@@ -247,6 +250,49 @@ jump_statement
         $$ = create_node(NODE_RETURN);
         SET_LINE($$);
         $$->left = $2;
+    }
+    | T_BREAK ';' {
+        $$ = create_break_node();
+        SET_LINE($$);
+    }
+    ;
+
+switch_statement
+    : T_SWITCH '(' expression ')' '{' switch_clause_list '}' {
+        $$ = create_switch_node($3, $6);
+        SET_LINE($$);
+    }
+    ;
+
+switch_clause_list
+    : switch_clause { $$ = $1; }
+    | switch_clause_list switch_clause {
+        $$ = $1;
+        append_node($$, $2);
+    }
+    ;
+
+switch_clause
+    : T_CASE expression ':' statement_list_opt {
+        $$ = create_case_node($2, $4);
+        SET_LINE($$);
+    }
+    | T_DEFAULT ':' statement_list_opt {
+        $$ = create_case_node(NULL, $3);
+        SET_LINE($$);
+    }
+    ;
+
+statement_list_opt
+    : /* empty */ { $$ = NULL; }
+    | statement_list { $$ = $1; }
+    ;
+
+statement_list
+    : statement { $$ = $1; }
+    | statement_list statement {
+        $$ = $1;
+        append_node($$, $2);
     }
     ;
 

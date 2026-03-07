@@ -23,29 +23,33 @@ int token_col;
  /* ---------- Token name helper ---------- */
 const char *token_name(int token) {
     switch (token) {
-        case T_INT:    return "T_INT";
-        case T_VOID:   return "T_VOID";
-        case T_IF:     return "T_IF";
-        case T_ELSE:   return "T_ELSE";
-        case T_WHILE:  return "T_WHILE";
-        case T_FOR:    return "T_FOR";
-        case T_RETURN: return "T_RETURN";
+        case T_INT:     return "T_INT";
+        case T_VOID:    return "T_VOID";
+        case T_IF:      return "T_IF";
+        case T_ELSE:    return "T_ELSE";
+        case T_WHILE:   return "T_WHILE";
+        case T_FOR:     return "T_FOR";
+        case T_RETURN:  return "T_RETURN";
+        case T_SWITCH:  return "T_SWITCH";
+        case T_CASE:    return "T_CASE";
+        case T_DEFAULT: return "T_DEFAULT";
+        case T_BREAK:   return "T_BREAK";
 
-        case T_IDENT:  return "T_IDENT";
-        case T_NUMBER: return "T_NUMBER";
+        case T_IDENT:   return "T_IDENT";
+        case T_NUMBER:  return "T_NUMBER";
 
-        case T_EQ:     return "T_EQ";
-        case T_NEQ:    return "T_NEQ";
-        case T_LE:     return "T_LE";
-        case T_GE:     return "T_GE";
-        case T_AND:    return "T_AND";
-        case T_OR:     return "T_OR";
+        case T_EQ:      return "T_EQ";
+        case T_NEQ:     return "T_NEQ";
+        case T_LE:      return "T_LE";
+        case T_GE:      return "T_GE";
+        case T_AND:     return "T_AND";
+        case T_OR:      return "T_OR";
 
 	//  added on 30/1/2026	
-	case T_CHAR:    return "T_CHAR";
-	//case T_STRING:  return "T_STRING";
-	case T_CHAR_LIT: return "T_CHAR_LIT";
-	case T_STRING_LIT:    return "T_STRING_LIT";
+	case T_CHAR:        return "T_CHAR";
+	//case T_STRING:    return "T_STRING";
+	case T_CHAR_LIT:    return "T_CHAR_LIT";
+	case T_STRING_LIT:  return "T_STRING_LIT";
         
 	default:
             if (token < 256) {
@@ -83,6 +87,10 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "while"     { SAVE_POS(); ADVANCE(); return T_WHILE; }
 "for"       { SAVE_POS(); ADVANCE(); return T_FOR; }
 "return"    { SAVE_POS(); ADVANCE(); return T_RETURN; }
+"switch"    { SAVE_POS(); ADVANCE(); return T_SWITCH; }
+"case"      { SAVE_POS(); ADVANCE(); return T_CASE; }
+"default"   { SAVE_POS(); ADVANCE(); return T_DEFAULT; }
+"break"     { SAVE_POS(); ADVANCE(); return T_BREAK; }
 
  /* ---------- Multi-char operators ---------- */
 "=="        { SAVE_POS(); ADVANCE(); return T_EQ; }
@@ -110,6 +118,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 ")"         { SAVE_POS(); ADVANCE(); return ')'; }
 "{"         { SAVE_POS(); ADVANCE(); return '{'; }
 "}"         { SAVE_POS(); ADVANCE(); return '}'; }
+":"         { SAVE_POS(); ADVANCE(); return ':'; }
 
  /* ---------- Literals ---------- */
 {NUMBER} {

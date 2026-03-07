@@ -21,7 +21,10 @@ typedef enum {
     NODE_VAR,
     NODE_FUNC_CALL,
     NODE_TYPE,
-    NODE_EMPTY
+    NODE_EMPTY,
+    NODE_SWITCH,
+    NODE_CASE,
+    NODE_BREAK
 } NodeType;
 
 typedef struct ASTNode {
@@ -65,6 +68,9 @@ ASTNode* create_if_node(ASTNode *cond, ASTNode *then_stmt, ASTNode *else_stmt);
 ASTNode* create_while_node(ASTNode *cond, ASTNode *body);
 ASTNode* create_for_node(ASTNode *init, ASTNode *cond, ASTNode *incr, ASTNode *body);
 ASTNode* create_func_def(ASTNode *ret_type, char *name, ASTNode *params, ASTNode *body);
+ASTNode* create_switch_node(ASTNode *cond, ASTNode *cases);
+ASTNode* create_case_node(ASTNode *expr, ASTNode *body);
+ASTNode* create_break_node(void);
 
 // List manipulation
 void append_node(ASTNode *head, ASTNode *new_node);
