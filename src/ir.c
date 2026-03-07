@@ -170,6 +170,28 @@ IRInstr* ir_make_if(IROperand left, IROperand right, IRRelop relop, char *label,
     return i;
 }
 
+IRInstr* ir_make_load(char *dst, IROperand base, IROperand index, int scale, int line) {
+    IRInstr *i = calloc(1, sizeof(IRInstr));
+    i->kind = IR_LOAD;
+    i->line = line;
+    i->result = dst ? strdup(dst) : NULL;
+    i->base = op_dup(&base);
+    i->index = op_dup(&index);
+    i->scale = scale;
+    return i;
+}
+
+IRInstr* ir_make_store(IROperand base, IROperand index, int scale, IROperand value, int line) {
+    IRInstr *i = calloc(1, sizeof(IRInstr));
+    i->kind = IR_STORE;
+    i->line = line;
+    i->base = op_dup(&base);
+    i->index = op_dup(&index);
+    i->scale = scale;
+    i->store_val = op_dup(&value);
+    return i;
+}
+
 /* --- List management --- */
 void ir_append(IRInstr **head, IRInstr *instr) {
     if (!instr) return;
@@ -268,7 +290,7 @@ void ir_print_instr(IRInstr *instr) {
             printf("\n");
             break;
         case IR_UNOP:
-            printf("  %s := %c", instr->result, instr->unop);
+            printf("  %s = %c", instr->result, instr->unop);
             print_operand(&instr->unop_src);
             printf("\n");
             break;
@@ -304,6 +326,34 @@ void ir_print_instr(IRInstr *instr) {
             print_operand(&instr->if_right);
             printf(" goto %s\n", instr->label);
             break;
+        case IR_LOAD:
+            printf("  %s = ", instr->result ? instr->result : "?");
+            if (instr->index.is_const && instr->index.const_val == 0) {
+                printf("*");
+            }
+            print_operand(&instr->base);
+            if (!(instr->index.is_const && instr->index.const_val == 0)) {
+                printf("[");
+                print_operand(&instr->index);
+                printf("]");
+            }
+            printf("\n");
+            break;
+        case IR_STORE:
+            if (instr->index.is_const && instr->index.const_val == 0) {
+                printf("  *");
+            }
+            print_operand(&instr->base);
+            if (!(instr->index.is_const && instr->index.const_val == 0)) {
+                printf("[");
+                print_operand(&instr->index);
+                printf("]");
+            }
+            printf(" = ");
+            print_operand(&instr->store_val);
+            printf("\n");
+            break;
+
     }
 }
 
@@ -388,6 +438,27 @@ void ir_export_to_file(IRProgram *prog, const char *filename) {
                     else fprintf(f, "%s", i->if_right.name);
                     fprintf(f, " goto %s\n", i->label);
                     break;
+                case IR_LOAD:
+                    fprintf(f, "  %s := load ", i->result ? i->result : "?");
+                    if (i->base.is_const) fprintf(f, "%d", i->base.const_val);
+                    else fprintf(f, "%s", i->base.name);
+                    fprintf(f, "[");
+                    if (i->index.is_const) fprintf(f, "%d", i->index.const_val);
+                    else fprintf(f, "%s", i->index.name);
+                    fprintf(f, "] (scale %d)\n", i->scale);
+                    break;
+                case IR_STORE:
+                    fprintf(f, "  store ");
+                    if (i->base.is_const) fprintf(f, "%d", i->base.const_val);
+                    else fprintf(f, "%s", i->base.name);
+                    fprintf(f, "[");
+                    if (i->index.is_const) fprintf(f, "%d", i->index.const_val);
+                    else fprintf(f, "%s", i->index.name);
+                    fprintf(f, "] (scale %d) := ", i->scale);
+                    if (i->store_val.is_const) fprintf(f, "%d", i->store_val.const_val);
+                    else fprintf(f, "%s", i->store_val.name);
+                    fprintf(f, "\n");
+                    break;
             }
         }
         fprintf(f, "\n");
@@ -434,6 +505,16 @@ void ir_free_instr(IRInstr *instr) {
                 if (instr->if_left.name) free(instr->if_left.name);
                 if (instr->if_right.name) free(instr->if_right.name);
             }
+            break;
+        case IR_LOAD:
+            if (instr->result) free(instr->result);
+            if (instr->base.name) free(instr->base.name);
+            if (instr->index.name) free(instr->index.name);
+            break;
+        case IR_STORE:
+            if (instr->base.name) free(instr->base.name);
+            if (instr->index.name) free(instr->index.name);
+            if (instr->store_val.name) free(instr->store_val.name);
             break;
     }
     ir_free_instr(instr->next);

@@ -26,9 +26,30 @@ typedef struct Symbol {
     int line_number;
     int scope_level;
 
+    /* Array information (for variables/parameters) */
+    /* is_array: 1 if this symbol represents an array object */
+    int is_array;
+    /* array_size:
+     *   > 0  => fixed-size array with that many elements
+     *   0    => not an array
+     *   -1   => array parameter declared with [], size not specified
+     */
+    int array_size;
+
+    // New: pointer and multi-dim array info
+    int pointer_level;
+    int array_dim_count;
+    int *array_sizes; // for fixed sizes
+    struct ASTNode **array_dim_exprs; // for VLAs
+
     // For functions
     int param_count;
     DataType *param_types;
+    /* For functions: per-parameter array flag
+     *   param_is_array[i] == 1 if the i-th parameter is an array
+     *   (e.g., declared as T a[]).
+     */
+    int *param_is_array;
 
     struct Symbol *next;   // hash chaining
 } Symbol;

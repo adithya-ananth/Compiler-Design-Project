@@ -21,6 +21,7 @@ void analyze_assignment(ASTNode *node);
 void analyze_binary(ASTNode *node);
 
 void analyze_unary(ASTNode *node);
+void analyze_index(ASTNode *node);
 
 void analyze_function_call(ASTNode *node);
 
@@ -35,5 +36,7 @@ int analyze_while(ASTNode *node);
 int analyze_for(ASTNode* node);
 
 int analyze_switch(ASTNode *node);
+
+int get_type_size(DataType t);
 
 #endif

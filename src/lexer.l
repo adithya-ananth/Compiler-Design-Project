@@ -110,6 +110,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "/"         { SAVE_POS(); ADVANCE(); return '/'; }
 "%"         { SAVE_POS(); ADVANCE(); return '%'; }
 "!"         { SAVE_POS(); ADVANCE(); return '!'; }
+"&"         { SAVE_POS(); ADVANCE(); return '&'; }
 
  /* ---------- Delimiters ---------- */
 ";"         { SAVE_POS(); ADVANCE(); return ';'; }
@@ -119,6 +120,8 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "{"         { SAVE_POS(); ADVANCE(); return '{'; }
 "}"         { SAVE_POS(); ADVANCE(); return '}'; }
 ":"         { SAVE_POS(); ADVANCE(); return ':'; }
+"["         { SAVE_POS(); ADVANCE(); return '['; }
+"]"         { SAVE_POS(); ADVANCE(); return ']'; }
 
  /* ---------- Literals ---------- */
 {NUMBER} {

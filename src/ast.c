@@ -28,6 +28,8 @@ const char* node_type_to_string(NodeType type) {
         case NODE_SWITCH: return "SWITCH";
         case NODE_CASE: return "CASE";
         case NODE_BREAK: return "BREAK";
+        case NODE_ARRAY_DECL: return "ARRAY_DECL";
+        case NODE_INDEX: return "INDEX";
         default: return "UNKNOWN";
     }
 }
@@ -45,6 +47,7 @@ const char* get_op_string(int op) {
         case '<': return "<";
         case '>': return ">";
         case '=': return "=";
+        case '&' :return "&";
         case '!': return "!";
 
         case T_EQ:  return "==";
@@ -145,6 +148,12 @@ ASTNode* create_node(NodeType type) {
 
     node->data_type = TYPE_VOID;  //default
     node->line_number = 0; //default
+    node->int_val = 0;
+
+    // New fields
+    node->pointer_level = 0;
+    node->array_dim_count = 0;
+    node->array_dim_exprs = NULL;
     return node;
 }
 
@@ -257,6 +266,22 @@ ASTNode* create_func_def(ASTNode *ret_type, char *name, ASTNode *params, ASTNode
     return node;
 }
 
+ASTNode* create_array_decl_node(char *name, ASTNode *type_node, int dim_count, ASTNode **dim_exprs) {
+    ASTNode *node = create_node(NODE_ARRAY_DECL);
+    node->str_val = strdup(name);
+    node->left = type_node;
+    node->array_dim_count = dim_count;
+    node->array_dim_exprs = dim_exprs; // caller allocates
+    return node;
+}
+
+ASTNode* create_index_node(ASTNode *base, ASTNode *index) {
+    ASTNode *node = create_node(NODE_INDEX);
+    node->left = base;
+    node->right = index;
+    return node;
+}
+
 ASTNode* create_switch_node(ASTNode *cond, ASTNode *cases) {
     ASTNode *node = create_node(NODE_SWITCH);
     node->cond = cond;
@@ -316,9 +341,32 @@ void print_ast(ASTNode *node, int level) {
             print_ast(node->body, level + 2);
             break;
         case NODE_VAR_DECL:
-            printf("VarDecl: %s\n", node->str_val);
+            printf("VarDecl: %s", node->str_val);
+            if (node->pointer_level > 0) printf(" (pointer level %d)", node->pointer_level);
+            if (node->array_dim_count > 0) {
+                printf(" [");
+                for (int i = 0; i < node->array_dim_count; i++) {
+                    if (i > 0) printf(",");
+                    if (node->array_dim_exprs[i]) {
+                        printf("expr");
+                    } else {
+                        printf("VLA");
+                    }
+                }
+                printf("]");
+            }
+            printf("\n");
             print_ast(node->left, level + 1); // Type
             if (node->right) {
+                print_indent(level + 1); printf("Initializer:\n");
+                print_ast(node->right, level + 2);
+            }
+            break;
+        case NODE_ARRAY_DECL:
+            printf("ArrayDecl: %s [size=%d]\n", node->str_val, node->int_val);
+            print_ast(node->left, level + 1); // element type
+            if (node->right) {
+                /* unlikely: initializer for array */
                 print_indent(level + 1); printf("Initializer:\n");
                 print_ast(node->right, level + 2);
             }
@@ -379,6 +427,13 @@ void print_ast(ASTNode *node, int level) {
         case NODE_UN_OP:
             printf("UnOp: %s\n", get_op_string(node->int_val));
             print_ast(node->left, level + 1);
+            break;
+        case NODE_INDEX:
+            printf("Index\n");
+            print_indent(level + 1); printf("Base:\n");
+            print_ast(node->left, level + 2);
+            print_indent(level + 1); printf("Index Expr:\n");
+            print_ast(node->right, level + 2);
             break;
         case NODE_CONST_INT:
             printf("Int: %d\n", node->int_val);

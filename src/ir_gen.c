@@ -8,6 +8,7 @@
 #include <string.h>
 #include "ast.h"
 #include "ir.h"
+#include "semantic.h"
 #include "ir_gen.h"
 #include "y.tab.h"
 
@@ -19,6 +20,9 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list);
 
 /* Generate code for statement */
 static void gen_stmt(ASTNode *node, IRInstr **list);
+
+static void get_index_info(ASTNode *node, char **base_name, IROperand *index_op, IRInstr **list, int line);
+static IROperand gen_index_expr(ASTNode *node, IRInstr **list, int line);
 
 /* Break target stack for loops and switches */
 #define MAX_BREAK_DEPTH 64
@@ -38,6 +42,63 @@ static void pop_break_label(void) {
 static const char *current_break_label(void) {
     if (break_label_top <= 0) return NULL;
     return break_label_stack[break_label_top - 1];
+}
+
+static void get_index_info(ASTNode *node, char **base_name, IROperand *index_op, IRInstr **list, int line) {
+    ASTNode *indices[10];
+    int num_indices = 0;
+    ASTNode *base_node = node;
+    while (base_node->type == NODE_INDEX) {
+        indices[num_indices++] = base_node->right;
+        base_node = base_node->left;
+    }
+    *base_name = base_node->str_val;
+    // Reverse indices: innermost first
+    for (int i = 0; i < num_indices / 2; i++) {
+        ASTNode *temp = indices[i];
+        indices[i] = indices[num_indices - 1 - i];
+        indices[num_indices - 1 - i] = temp;
+    }
+    // Compute linear index
+    Symbol *sym = lookup(*base_name);
+    if (!sym || sym->array_dim_count == 0) {
+        *index_op = ir_op_const(0);
+        return;
+    }
+    IROperand linear = gen_expr(indices[num_indices-1], list);
+    int stride = 1;
+    for (int i = num_indices - 2; i >= 0; i--) {
+        stride *= sym->array_sizes[i+1];
+        IROperand idx = gen_expr(indices[i], list);
+        char *temp1 = ir_new_temp();
+        ir_append(list, ir_make_binop(temp1, idx, ir_op_const(stride), '*', line));
+        char *temp2 = ir_new_temp();
+        ir_append(list, ir_make_binop(temp2, linear, ir_op_name(temp1), '+', line));
+        linear = ir_op_name(temp2);
+        free(temp1);
+        free(temp2);
+    }
+    *index_op = linear;
+}
+
+static IROperand gen_index_expr(ASTNode *node, IRInstr **list, int line) {
+    char *base_name;
+    IROperand index_op;
+    get_index_info(node, &base_name, &index_op, list, line);
+    Symbol *sym = lookup(base_name);
+    int scale = (sym && sym->type == TYPE_INT) ? 4 : 1;
+    IROperand base_op = ir_op_name(base_name);
+    char *scaled_temp = ir_new_temp();
+    IROperand scaled_op = ir_op_name(scaled_temp);
+    ir_append(list, ir_make_binop(scaled_temp, index_op, ir_op_const(scale), '*', line));
+    char *t = ir_new_temp();
+    ir_append(list, ir_make_load(t, base_op, scaled_op, 1, line));
+    if (base_op.name) free(base_op.name);
+    if (index_op.name) free(index_op.name);
+    free(scaled_temp);
+    IROperand res = ir_op_name(t);
+    free(t);
+    return res;
 }
 
 /* --- Condition generation (for if/while/for) --- */
@@ -150,6 +211,9 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
 
         case NODE_VAR:
             return ir_op_name(node->str_val);
+        case NODE_INDEX: {
+            return gen_index_expr(node, list, line);
+        }
 
         case NODE_BIN_OP: {
             if (node->int_val == T_AND || node->int_val == T_OR) {
@@ -206,21 +270,77 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
         }
 
         case NODE_UN_OP: {
-            IROperand child = gen_expr(node->left, list);
-            char *t = ir_new_temp();
-            ir_append(list, ir_make_unop(t, child, node->int_val, line));
-            if (child.name) free(child.name);
-            IROperand res = ir_op_name(t);
-            free(t);
-            return res;
+            if (node->int_val == '*') {
+                // dereference: load from pointer
+                IROperand base = gen_expr(node->left, list);
+                char *t = ir_new_temp();
+                int scale = get_type_size(node->type);
+                ir_append(list, ir_make_load(t, base, ir_op_const(0), scale, line));
+                if (base.name) free(base.name);
+                IROperand res = ir_op_name(t);
+                free(t);
+                return res;
+            } else if (node->int_val == '&') {
+                // address-of
+                IROperand child = gen_expr(node->left, list);
+                char *t = ir_new_temp();
+                ir_append(list, ir_make_unop(t, child, node->int_val, line));
+                if (child.name) free(child.name);
+                IROperand res = ir_op_name(t);
+                free(t);
+                return res;
+            } else {
+                // other unops like -
+                IROperand child = gen_expr(node->left, list);
+                char *t = ir_new_temp();
+                ir_append(list, ir_make_unop(t, child, node->int_val, line));
+                if (child.name) free(child.name);
+                IROperand res = ir_op_name(t);
+                free(t);
+                return res;
+            }
         }
 
         case NODE_ASSIGN: {
             IROperand val = gen_expr(node->right, list);
-            char *target = node->left->str_val;
-            ir_append(list, ir_make_assign(target, val, line));
-            if (val.name) free(val.name);
-            return ir_op_name(target);
+            if (node->left->type == NODE_VAR) {
+                char *target = node->left->str_val;
+                ir_append(list, ir_make_assign(target, val, line));
+                if (val.name) free(val.name);
+                return ir_op_name(target);
+            } else if (node->left->type == NODE_INDEX) {
+                /* Array element store */
+                char *base_name;
+                IROperand index_op;
+                get_index_info(node->left, &base_name, &index_op, list, line);
+                int scale = 4;
+                if (node->left->data_type == TYPE_CHAR) {
+                    scale = 1;
+                }
+                IROperand base_op = ir_op_name(base_name);
+                char *scaled_temp = ir_new_temp();
+                IROperand scaled_op = ir_op_name(scaled_temp);
+                ir_append(list, ir_make_binop(scaled_temp, index_op, ir_op_const(scale), '*', line));
+                ir_append(list, ir_make_store(base_op, scaled_op, 1, val, line));
+                if (base_op.name) free(base_op.name);
+                if (index_op.name) free(index_op.name);
+                free(scaled_temp);
+                if (val.name) free(val.name);
+                /* Result of assignment expression is the stored value */
+                return ir_op_const(0);
+            } else if (node->left->type == NODE_UN_OP && node->left->int_val == '*') {
+                /* Pointer dereference assignment: *p = val */
+                IROperand base = gen_expr(node->left->left, list);
+                int scale = get_type_size(node->left->type);
+                ir_append(list, ir_make_store(base, ir_op_const(0), scale, val, line));
+                if (base.name) free(base.name);
+                if (val.name) free(val.name);
+                return ir_op_const(0);
+            } else {
+                /* Fallback: treat as simple assignment to unknown target */
+                if (val.name) free(val.name);
+                return ir_op_const(0);
+            }
         }
 
         case NODE_FUNC_CALL: {

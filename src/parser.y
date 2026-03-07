@@ -54,7 +54,7 @@ ASTNode *root = NULL;
 /* Types for non-terminals */
 %type <node> program external_declaration_list external_declaration
 %type <node> function_definition parameter_list parameter_declaration
-%type <node> declaration declarator_list declarator type_specifier
+%type <node> declaration declarator_list declarator pointer direct_declarator type_specifier
 %type <node> statement compound_statement block_item_list block_item
 %type <node> expression_statement selection_statement iteration_statement jump_statement
 %type <node> switch_statement switch_clause_list switch_clause
@@ -110,11 +110,16 @@ parameter_list
     ;
 
 parameter_declaration
-    : type_specifier T_IDENT {
-        $$ = create_node(NODE_PARAM);
-        SET_LINE($$);
-        $$->left = $1;
-        $$->str_val = strdup($2);
+    : type_specifier declarator {
+        ASTNode *param = create_node(NODE_PARAM);
+        SET_LINE(param);
+        param->left = $1;
+        param->str_val = $2->str_val;
+        param->pointer_level = $2->pointer_level;
+        param->array_dim_count = $2->array_dim_count;
+        param->array_dim_exprs = $2->array_dim_exprs;
+        // Note: $2 is freed implicitly or we can free it
+        $$ = param;
     }
     ;
 
@@ -144,16 +149,46 @@ declarator_list
     ;
 
 declarator
+    : pointer direct_declarator {
+        $$ = $2;
+        $$->pointer_level = $1->int_val;
+    }
+    | direct_declarator {
+        $$ = $1;
+        $$->pointer_level = 0;
+    }
+    ;
+
+pointer
+    : '*' {
+        $$ = create_node(NODE_TYPE);
+        $$->int_val = 1;
+    }
+    | '*' pointer {
+        $$ = $2;
+        $$->int_val++;
+    }
+    ;
+
+direct_declarator
     : T_IDENT {
         $$ = create_node(NODE_VAR_DECL);
         SET_LINE($$);
         $$->str_val = strdup($1);
+        $$->array_dim_count = 0;
+        $$->array_dim_exprs = NULL;
     }
-    | T_IDENT '=' expression {
-        $$ = create_node(NODE_VAR_DECL);
-        SET_LINE($$);
-        $$->str_val = strdup($1);
-        $$->right = $3; // Initializer
+    | direct_declarator '[' expression ']' {
+        $$ = $1;
+        $$->array_dim_exprs = realloc($$->array_dim_exprs, sizeof(ASTNode*) * ($$->array_dim_count + 1));
+        $$->array_dim_exprs[$$->array_dim_count] = $3;
+        $$->array_dim_count++;
+    }
+    | direct_declarator '[' ']' {
+        $$ = $1;
+        $$->array_dim_exprs = realloc($$->array_dim_exprs, sizeof(ASTNode*) * ($$->array_dim_count + 1));
+        $$->array_dim_exprs[$$->array_dim_count] = NULL; // VLA
+        $$->array_dim_count++;
     }
     ;
 
@@ -302,12 +337,15 @@ expression
     ;
 
 assignment_expression
-    : logical_or_expression { $$ = $1; }
-    | T_IDENT '=' assignment_expression {
-        ASTNode *var = create_var_node($1);
+    : logical_or_expression { /* no assignment, just propagate the expression */
+        $$ = $1;
+    }
+    /* allow any lvalue produced by logical_or_expression (identifier, index, etc.) */
+    | logical_or_expression '=' assignment_expression {
+        /* left side is already an ASTNode representing a variable or indexed value */
         $$ = create_node(NODE_ASSIGN);
         SET_LINE($$);
-        $$->left = var;
+        $$->left = $1;
         $$->right = $3;
     }
     ;
@@ -395,6 +433,14 @@ unary_expression
         $$ = create_unary_node('!', $2);
         SET_LINE($$);
     }
+    | '&' unary_expression {
+        $$ = create_unary_node('&', $2);
+        SET_LINE($$);
+    }
+    | '*' unary_expression {
+        $$ = create_unary_node('*', $2);
+        SET_LINE($$);
+    }
     ;
 
 primary_expression
@@ -429,6 +475,11 @@ primary_expression
         SET_LINE(func);
         func->str_val = strdup($1);
         $$ = func;
+    }
+    | primary_expression '[' expression ']' {
+        /* Array indexing: build NODE_INDEX with base and index */
+        $$ = create_index_node($1, $3);
+        SET_LINE($$);
     }
     ;
 

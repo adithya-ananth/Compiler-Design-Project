@@ -37,6 +37,13 @@ void free_symbol_list(Symbol *sym) {
         free(temp->name);
         if (temp->param_types)
             free(temp->param_types);
+        if (temp->param_is_array)
+            free(temp->param_is_array);
+        // New: free array fields
+        if (temp->array_sizes)
+            free(temp->array_sizes);
+        if (temp->array_dim_exprs)
+            free(temp->array_dim_exprs);
         free(temp);
     }
 }
@@ -69,8 +76,20 @@ Symbol *create_symbol(char *name, DataType type,
     sym->kind = kind;
     sym->line_number = line;
     sym->scope_level = current_scope->level;
+
+    /* Default: not an array symbol */
+    sym->is_array = 0;
+    sym->array_size = 0;
+
+    // New fields
+    sym->pointer_level = 0;
+    sym->array_dim_count = 0;
+    sym->array_sizes = NULL;
+    sym->array_dim_exprs = NULL;
+
     sym->param_count = 0;
     sym->param_types = NULL;
+    sym->param_is_array = NULL;
     sym->next = NULL;
 
     return sym;
@@ -110,21 +129,17 @@ Symbol *lookup_current(char *name) {
 }
 
 Symbol *lookup(char *name) {
-    Scope *scope = current_scope;
-
+    Scope *scope = all_scopes;
     while (scope) {
         unsigned int index = hash(name);
         Symbol *sym = scope->table[index];
-
         while (sym) {
             if (strcmp(sym->name, name) == 0)
                 return sym;
             sym = sym->next;
         }
-
-        scope = scope->parent;
+        scope = scope->next_scope;
     }
-
     return NULL;
 }
 
@@ -155,12 +170,26 @@ void print_scope(Scope *scope) {
     for (int i = 0; i < TABLE_SIZE; i++) {
         Symbol *sym = scope->table[i];
         while (sym) {
-            printf("Name: %-10s | Type: %-6s | Kind: %-9s | Line: %d | Scope: %d\n",
+            printf("Name: %-10s | Type: %-6s | Kind: %-9s | Line: %d | Scope: %d",
             sym->name,
             data_type_to_string(sym->type),
             symbol_kind_to_string(sym->kind),
             sym->line_number,
             sym->scope_level);
+            if (sym->pointer_level > 0) printf(" | Ptr: %d", sym->pointer_level);
+            if (sym->array_dim_count > 0) {
+                printf(" | Dims: [");
+                for (int d = 0; d < sym->array_dim_count; d++) {
+                    if (d > 0) printf(",");
+                    if (sym->array_sizes && sym->array_sizes[d] >= 0) {
+                        printf("%d", sym->array_sizes[d]);
+                    } else {
+                        printf("VLA");
+                    }
+                }
+                printf("]");
+            }
+            printf("\n");
             sym = sym->next;
         }
     }

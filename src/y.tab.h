@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YY_Y_TAB_H_INCLUDED
-# define YY_YY_Y_TAB_H_INCLUDED
+#ifndef YY_YY_BUILD_Y_TAB_H_INCLUDED
+# define YY_YY_BUILD_Y_TAB_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 # define YYDEBUG 1
@@ -62,17 +62,21 @@ extern int yydebug;
     T_WHILE = 263,                 /* T_WHILE  */
     T_FOR = 264,                   /* T_FOR  */
     T_RETURN = 265,                /* T_RETURN  */
-    T_IDENT = 266,                 /* T_IDENT  */
-    T_STRING_LIT = 267,            /* T_STRING_LIT  */
-    T_NUMBER = 268,                /* T_NUMBER  */
-    T_CHAR_LIT = 269,              /* T_CHAR_LIT  */
-    T_EQ = 270,                    /* T_EQ  */
-    T_NEQ = 271,                   /* T_NEQ  */
-    T_LE = 272,                    /* T_LE  */
-    T_GE = 273,                    /* T_GE  */
-    T_AND = 274,                   /* T_AND  */
-    T_OR = 275,                    /* T_OR  */
-    LOWER_THAN_ELSE = 276          /* LOWER_THAN_ELSE  */
+    T_SWITCH = 266,                /* T_SWITCH  */
+    T_CASE = 267,                  /* T_CASE  */
+    T_DEFAULT = 268,               /* T_DEFAULT  */
+    T_BREAK = 269,                 /* T_BREAK  */
+    T_IDENT = 270,                 /* T_IDENT  */
+    T_STRING_LIT = 271,            /* T_STRING_LIT  */
+    T_NUMBER = 272,                /* T_NUMBER  */
+    T_CHAR_LIT = 273,              /* T_CHAR_LIT  */
+    T_EQ = 274,                    /* T_EQ  */
+    T_NEQ = 275,                   /* T_NEQ  */
+    T_LE = 276,                    /* T_LE  */
+    T_GE = 277,                    /* T_GE  */
+    T_AND = 278,                   /* T_AND  */
+    T_OR = 279,                    /* T_OR  */
+    LOWER_THAN_ELSE = 280          /* LOWER_THAN_ELSE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -81,13 +85,13 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 27 "parser.y"
+#line 27 "src/parser.y"
 
     int intval;
     char *str;
     struct ASTNode *node;
 
-#line 91 "y.tab.h"
+#line 95 "build/y.tab.h"
 
 };
 typedef union YYSTYPE YYSTYPE;
@@ -102,4 +106,4 @@ extern YYSTYPE yylval;
 int yyparse (void);
 
 
-#endif /* !YY_YY_Y_TAB_H_INCLUDED  */
+#endif /* !YY_YY_BUILD_Y_TAB_H_INCLUDED  */

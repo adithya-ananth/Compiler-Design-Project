@@ -21,7 +21,9 @@ typedef enum {
     IR_RETURN,      /* return x  (or return for void) */
     IR_LABEL,       /* L1: */
     IR_GOTO,        /* goto L1 */
-    IR_IF           /* if x relop y goto L1 */
+    IR_IF,          /* if x relop y goto L1 */
+    IR_LOAD,        /* t := load base, idx, scale */
+    IR_STORE        /* store base, idx, scale := val */
 } IROpKind;
 
 /* Relational operators for IR_IF */
@@ -44,7 +46,7 @@ typedef struct IRInstr {
     IROpKind kind;
     int line;       /* source line for debugging */
 
-    /* For IR_ASSIGN, IR_BINOP, IR_UNOP: result location */
+    /* For IR_ASSIGN, IR_BINOP, IR_UNOP, IR_LOAD: result location */
     char *result;
 
     /* For IR_ASSIGN: source */
@@ -58,6 +60,19 @@ typedef struct IRInstr {
     /* For IR_UNOP: operand and operator */
     IROperand unop_src;
     int unop;       /* '-', '!' */
+
+    /* For IR_LOAD/IR_STORE: array element access
+     *   result (for IR_LOAD) holds destination temp/var name
+     *   base: base address (array variable)
+     *   index: index operand
+     *   scale: element size in bytes (e.g., 4 for int, 1 for char)
+     */
+    IROperand base;
+    IROperand index;
+    int scale;
+
+    /* For IR_STORE: value to be stored */
+    IROperand store_val;
 
     /* For IR_CALL: function name, arg count */
     char *call_fn;
@@ -105,6 +120,10 @@ IRInstr* ir_make_return(int line);
 IRInstr* ir_make_label(char *label, int line);
 IRInstr* ir_make_goto(char *label, int line);
 IRInstr* ir_make_if(IROperand left, IROperand right, IRRelop relop, char *label, int line);
+
+/* Array element load/store */
+IRInstr* ir_make_load(char *dst, IROperand base, IROperand index, int scale, int line);
+IRInstr* ir_make_store(IROperand base, IROperand index, int scale, IROperand value, int line);
 
 /* --- Operand helpers --- */
 IROperand ir_op_name(char *name);
