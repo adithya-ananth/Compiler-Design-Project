@@ -28,18 +28,23 @@ typedef enum {
     NODE_CONTINUE,
     /* Arrays */
     NODE_ARRAY_DECL,   /* array declaration */
-    NODE_INDEX         /* a[i] indexing expression */
+    NODE_INDEX,        /* a[i] indexing expression */
+    NODE_MEMBER_ACCESS,/* struct member access (., ->) */
+    NODE_STRUCT_DEF    /* struct definition */
 } NodeType;
 
 typedef struct ASTNode {
     NodeType type;
-    DataType data_type;   // semantic type (int, char, void)
+    DataType data_type;   // semantic type (int, char, void, struct)
     int line_number;      // source line number
     // For operators (+, -, *, etc.) and types (int, void)
     int int_val;
 
     // For identifiers and string literals
     char *str_val;
+
+    // Member access offset (byte offset within struct)
+    int member_offset;
 
     // Children pointers
     struct ASTNode *left;

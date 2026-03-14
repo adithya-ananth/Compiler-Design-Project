@@ -232,6 +232,22 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
             return gen_index_expr(node, list, line);
         }
 
+        case NODE_MEMBER_ACCESS: {
+            /* member access: compute base pointer/address and load field */
+            IROperand base = gen_expr(node->left, list);
+            int offset = node->member_offset;
+            int scale = get_type_size(node->data_type);
+            if (scale <= 0) scale = 1;
+            int idx = offset / scale;
+            IROperand index = ir_op_const(idx);
+            char *t = ir_new_temp();
+            ir_append(list, ir_make_load(t, base, index, scale, line));
+            if (base.name) free(base.name);
+            IROperand res = ir_op_name(t);
+            free(t);
+            return res;
+        }
+
         case NODE_BIN_OP: {
             if (node->int_val == T_AND || node->int_val == T_OR) {
                 /* Short-circuit: produce 0 or 1 */
@@ -344,6 +360,19 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
                 free(scaled_temp);
                 if (val.name) free(val.name);
                 /* Result of assignment expression is the stored value */
+                return ir_op_const(0);
+            } else if (node->left->type == NODE_MEMBER_ACCESS) {
+                /* Struct member store */
+                ASTNode *mem = node->left;
+                IROperand base = gen_expr(mem->left, list);
+                int offset = mem->member_offset;
+                int scale = get_type_size(mem->data_type);
+                if (scale <= 0) scale = 1;
+                int idx = offset / scale;
+                IROperand index_op = ir_op_const(idx);
+                ir_append(list, ir_make_store(base, index_op, scale, val, line));
+                if (base.name) free(base.name);
+                if (val.name) free(val.name);
                 return ir_op_const(0);
             } else if (node->left->type == NODE_UN_OP && node->left->int_val == '*') {
                 /* Pointer dereference assignment: *p = val */

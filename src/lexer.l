@@ -35,6 +35,8 @@ const char *token_name(int token) {
         case T_DEFAULT: return "T_DEFAULT";
         case T_BREAK:   return "T_BREAK";
         case T_CONTINUE:return "T_CONTINUE";
+        case T_STRUCT:  return "T_STRUCT";
+        case T_ARROW:   return "T_ARROW";
 
         case T_IDENT:   return "T_IDENT";
         case T_NUMBER:  return "T_NUMBER";
@@ -83,6 +85,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "int"       { SAVE_POS(); ADVANCE(); return T_INT; }
 "void"      { SAVE_POS(); ADVANCE(); return T_VOID; }
 "char"      { SAVE_POS(); ADVANCE(); return T_CHAR; }  // added 30/1/2026
+"struct"    { SAVE_POS(); ADVANCE(); return T_STRUCT; }
 "if"        { SAVE_POS(); ADVANCE(); return T_IF; }
 "else"      { SAVE_POS(); ADVANCE(); return T_ELSE; }
 "while"     { SAVE_POS(); ADVANCE(); return T_WHILE; }
@@ -101,6 +104,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 ">="        { SAVE_POS(); ADVANCE(); return T_GE; }
 "&&"        { SAVE_POS(); ADVANCE(); return T_AND; }
 "||"        { SAVE_POS(); ADVANCE(); return T_OR; }
+"->"        { SAVE_POS(); ADVANCE(); return T_ARROW; }
 
  /* ---------- Single-char operators ---------- */
 "="         { SAVE_POS(); ADVANCE(); return '='; }
@@ -113,6 +117,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "%"         { SAVE_POS(); ADVANCE(); return '%'; }
 "!"         { SAVE_POS(); ADVANCE(); return '!'; }
 "&"         { SAVE_POS(); ADVANCE(); return '&'; }
+"."         { SAVE_POS(); ADVANCE(); return '.'; }
 
  /* ---------- Delimiters ---------- */
 ";"         { SAVE_POS(); ADVANCE(); return ';'; }

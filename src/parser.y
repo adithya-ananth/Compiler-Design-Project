@@ -31,10 +31,11 @@ ASTNode *root = NULL;
 }
 
 /* Tokens */
-%token <intval> T_INT T_VOID T_CHAR
+%token <intval> T_INT T_VOID T_CHAR T_STRUCT
 %token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK T_CONTINUE
 %token <str>    T_IDENT T_STRING_LIT
 %token <intval> T_NUMBER T_CHAR_LIT
+%token <intval> T_ARROW
 
 /* Operators */
 %token T_EQ T_NEQ T_LE T_GE T_AND T_OR
@@ -61,8 +62,9 @@ ASTNode *root = NULL;
 %type <node> statement_list statement_list_opt
 %type <node> expression assignment_expression logical_or_expression logical_and_expression
 %type <node> equality_expression relational_expression additive_expression
-%type <node> multiplicative_expression unary_expression primary_expression
+%type <node> multiplicative_expression unary_expression postfix_expression primary_expression
 %type <node> argument_expression_list
+%type <node> struct_specifier struct_declaration_list
 
 %%
 
@@ -124,18 +126,52 @@ parameter_declaration
 /* Declarations */
 declaration
     : type_specifier declarator_list ';' {
-        // Distribute type to all declarators
+        /* If this is a struct definition with declarators (e.g. "struct S { ... } a;")
+         * we need to keep the struct definition node in the AST so semantic
+         * analysis can register the struct type before processing the variables.
+         */
+        ASTNode *result = NULL;
+        ASTNode *type_node = NULL;
+
+        if ($1->type == NODE_STRUCT_DEF) {
+            /* Keep the struct definition in the list */
+            result = $1;
+            /* Build a type node to attach to each declarator */
+            type_node = create_type_node(T_STRUCT);
+            type_node->str_val = strdup($1->str_val);
+            type_node->left = $1; /* keep definition for semantic use */
+        } else {
+            /* Normal type specifier (int/char/void/struct ref) */
+            type_node = $1;
+        }
+
+        /* Distribute type to all declarators */
         ASTNode *temp = $2;
-        while(temp) { 
-            temp->left = create_type_node($1->int_val); // Set type
+        while(temp) {
+            temp->left = type_node;
+            if (type_node->type == NODE_TYPE && type_node->int_val == T_STRUCT) {
+                /* Preserve struct tag name if set */
+                if (!temp->left->str_val && type_node->str_val)
+                    temp->left->str_val = strdup(type_node->str_val);
+            }
             temp = temp->next;
         }
-        $$ = $2;
+
+        if (result) {
+            /* append declarators after struct definition */
+            $$ = append_node(result, $2);
+        } else {
+            $$ = $2;
+        }
     }
     | type_specifier declarator_list error {
         yyerrok;
         $$ = $2;
       }
+    | struct_specifier ';' {
+        /* Standalone struct definition (no variable declared) */
+        $$ = $1;
+    }
     ;
 
 declarator_list
@@ -205,6 +241,30 @@ type_specifier
     : T_INT  { $$ = create_type_node(T_INT);  SET_LINE($$); }
     | T_VOID { $$ = create_type_node(T_VOID); SET_LINE($$); }
     | T_CHAR { $$ = create_type_node(T_CHAR); SET_LINE($$); }
+    | struct_specifier { $$ = $1; }
+    ;
+
+struct_specifier
+    : T_STRUCT T_IDENT '{' struct_declaration_list '}' {
+        ASTNode *node = create_node(NODE_STRUCT_DEF);
+        SET_LINE(node);
+        node->str_val = strdup($2);             /* struct tag */
+        node->body = $4;                        /* member declarations */
+        $$ = node;
+    }
+    | T_STRUCT T_IDENT {
+        /* Struct type reference (no definition)
+         * We create a NODE_TYPE with int_val = T_STRUCT and str_val = tag.
+         */
+        ASTNode *node = create_type_node(T_STRUCT);
+        node->str_val = strdup($2);
+        $$ = node;
+    }
+    ;
+
+struct_declaration_list
+    : declaration { $$ = $1; }
+    | struct_declaration_list declaration { $$ = append_node($1, $2); }
     ;
 
 /* Statements */
@@ -436,8 +496,50 @@ multiplicative_expression
     }
     ;
 
-unary_expression
+postfix_expression
     : primary_expression { $$ = $1; }
+    | postfix_expression '[' expression ']' {
+        $$ = create_index_node($1, $3);
+        SET_LINE($$);
+    }
+    | postfix_expression '.' T_IDENT {
+        ASTNode *node = create_node(NODE_MEMBER_ACCESS);
+        SET_LINE(node);
+        node->left = $1;
+        node->str_val = strdup($3);
+        node->int_val = 0; /* dot */
+        $$ = node;
+    }
+    | postfix_expression T_ARROW T_IDENT {
+        ASTNode *node = create_node(NODE_MEMBER_ACCESS);
+        SET_LINE(node);
+        node->left = $1;
+        node->str_val = strdup($3);
+        node->int_val = 1; /* arrow */
+        $$ = node;
+    }
+    | postfix_expression '(' argument_expression_list ')' {
+        ASTNode *func = create_node(NODE_FUNC_CALL);
+        SET_LINE(func);
+        /* For now, require base be a simple var name */
+        if ($1 && $1->type == NODE_VAR) {
+            func->str_val = strdup($1->str_val);
+        }
+        func->left = $3; /* Arguments */
+        $$ = func;
+    }
+    | postfix_expression '(' ')' {
+        ASTNode *func = create_node(NODE_FUNC_CALL);
+        SET_LINE(func);
+        if ($1 && $1->type == NODE_VAR) {
+            func->str_val = strdup($1->str_val);
+        }
+        $$ = func;
+    }
+    ;
+
+unary_expression
+    : postfix_expression { $$ = $1; }
     | '-' unary_expression {
         $$ = create_unary_node('-', $2);
         SET_LINE($$);
@@ -475,24 +577,6 @@ primary_expression
     }
     | '(' expression ')' {
         $$ = $2;
-    }
-    | T_IDENT '(' argument_expression_list ')' {
-        ASTNode *func = create_node(NODE_FUNC_CALL);
-        SET_LINE(func);
-        func->str_val = strdup($1);
-        func->left = $3; // Arguments
-        $$ = func;
-    }
-    | T_IDENT '(' ')' {
-        ASTNode *func = create_node(NODE_FUNC_CALL);
-        SET_LINE(func);
-        func->str_val = strdup($1);
-        $$ = func;
-    }
-    | primary_expression '[' expression ']' {
-        /* Array indexing: build NODE_INDEX with base and index */
-        $$ = create_index_node($1, $3);
-        SET_LINE($$);
     }
     ;
 

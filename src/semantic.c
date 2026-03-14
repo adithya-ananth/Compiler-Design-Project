@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "symbol_table.h"
 #include "ast.h"
 #include "semantic.h"
@@ -13,10 +14,122 @@ static int current_local_offset = 0;
 static int current_param_offset = 16; /* standard positive offset for arg passing */
 
 int get_type_size(DataType t);
+static Symbol *find_struct_member(Symbol *struct_sym, const char *name) {
+    if (!struct_sym || struct_sym->kind != SYM_STRUCT) return NULL;
+    Symbol *m = struct_sym->members;
+    while (m) {
+        if (strcmp(m->name, name) == 0)
+            return m;
+        m = m->next;
+    }
+    return NULL;
+}
+
+static int get_symbol_size(Symbol *sym) {
+    if (!sym) return 0;
+    if (sym->pointer_level > 0) return 4;
+    if (sym->type == TYPE_INT) return 4;
+    if (sym->type == TYPE_CHAR) return 1;
+    if (sym->type == TYPE_STRUCT) {
+        if (sym->struct_def)
+            return sym->struct_def->struct_size;
+        return 0;
+    }
+    return 0;
+}
 
 void semantic_error(int line, const char *msg) {
     printf("Semantic Error (line %d): %s\n", line, msg);
     semantic_errors++;
+}
+
+
+void analyze_struct_def(ASTNode *node) {
+    if (!node || node->type != NODE_STRUCT_DEF) return;
+
+    if (!node->str_val) {
+        semantic_error(node->line_number, "Unnamed struct definitions are not supported");
+        return;
+    }
+
+    /* Check for redeclaration */
+    Symbol *existing = lookup(node->str_val);
+    if (existing) {
+        semantic_error(node->line_number, "Struct redeclared");
+        return;
+    }
+
+    Symbol *sym = create_symbol(node->str_val, TYPE_STRUCT, SYM_STRUCT, node->line_number);
+    if (!insert_symbol(sym)) {
+        semantic_error(node->line_number, "Failed to insert struct symbol");
+        return;
+    }
+
+    /* Build member list and compute sizes */
+    int offset = 0;
+    for (ASTNode *member = node->body; member; member = member->next) {
+        if (!member) continue;
+
+        Symbol *m = create_symbol(member->str_val,
+                                  member->left->data_type,
+                                  SYM_VARIABLE,
+                                  member->line_number);
+        m->pointer_level = member->pointer_level;
+        m->array_dim_count = member->array_dim_count;
+        if (member->array_dim_count > 0) {
+            m->array_sizes = malloc(sizeof(int) * member->array_dim_count);
+            for (int i = 0; i < member->array_dim_count; i++) {
+                if (member->array_dim_exprs && member->array_dim_exprs[i] &&
+                    member->array_dim_exprs[i]->type == NODE_CONST_INT) {
+                    m->array_sizes[i] = member->array_dim_exprs[i]->int_val;
+                } else {
+                    m->array_sizes[i] = -1;
+                }
+            }
+        }
+
+        if (member->left->data_type == TYPE_STRUCT && member->left->str_val) {
+            Symbol *sub = lookup(member->left->str_val);
+            if (!sub || sub->kind != SYM_STRUCT) {
+                semantic_error(member->line_number,
+                               "Unknown struct type for member");
+            } else {
+                m->struct_def = sub;
+            }
+        }
+
+        int size = get_symbol_size(m);
+        if (m->array_dim_count > 0) {
+            int total = size;
+            for (int i = 0; i < m->array_dim_count; i++) {
+                if (m->array_sizes[i] <= 0) {
+                    total = 0;
+                    break;
+                }
+                total *= m->array_sizes[i];
+            }
+            size = total;
+        }
+
+        m->offset = offset;
+        offset += size;
+
+        /* Add to struct member list */
+        m->next = sym->members;
+        sym->members = m;
+    }
+
+    sym->struct_size = offset;
+
+    /* Debug: print struct layout */
+    #ifdef DEBUG
+    printf("Struct %s size=%d\n", sym->name, sym->struct_size);
+    Symbol *m = sym->members;
+    while (m) {
+        printf("  member %s offset=%d size=%d\n", m->name, m->offset, get_symbol_size(m));
+        m = m->next;
+    }
+    #endif
 }
 
 
@@ -175,6 +288,17 @@ printf("Declaring %s at scope level %d\n",
         }
     }
 
+    /* If this variable is of struct type, link it to its definition */
+    if (node->left->data_type == TYPE_STRUCT && node->left->str_val) {
+        Symbol *struct_sym = lookup(node->left->str_val);
+        if (!struct_sym || struct_sym->kind != SYM_STRUCT) {
+            semantic_error(node->line_number,
+                           "Unknown struct type");
+        } else {
+            sym->struct_def = struct_sym;
+        }
+    }
+
     /* Compute offset and size */
     int size = get_type_size(node->left->data_type);
     if (sym->is_array && sym->array_size > 0) {
@@ -238,6 +362,73 @@ void analyze_variable(ASTNode *node) {
     node->data_type = sym->type;
 }
 
+void analyze_member_access(ASTNode *node) {
+    /* node->left is base expression; node->str_val is member name */
+    analyze_node(node->left);
+
+    if (!node->left) {
+        semantic_error(node->line_number, "Invalid member access");
+        node->data_type = TYPE_INT;
+        return;
+    }
+
+    /* Only support base being a variable for now */
+    if (node->left->type != NODE_VAR) {
+        semantic_error(node->line_number,
+                       "Unsupported member access base expression");
+        node->data_type = TYPE_INT;
+        return;
+    }
+
+    Symbol *base = lookup(node->left->str_val);
+    if (!base) {
+        semantic_error(node->line_number,
+                       "Undeclared variable in member access");
+        node->data_type = TYPE_INT;
+        return;
+    }
+
+    Symbol *struct_def = NULL;
+    if (node->int_val == 0) {
+        /* dot access */
+        if (base->type != TYPE_STRUCT) {
+            semantic_error(node->line_number,
+                           "Member access on non-struct type");
+            node->data_type = TYPE_INT;
+            return;
+        }
+        struct_def = base->struct_def;
+    } else {
+        /* arrow access */
+        if (base->type != TYPE_STRUCT || base->pointer_level == 0) {
+            semantic_error(node->line_number,
+                           "Arrow access on non-struct pointer");
+            node->data_type = TYPE_INT;
+            return;
+        }
+        struct_def = base->struct_def;
+    }
+
+    if (!struct_def) {
+        semantic_error(node->line_number,
+                       "Unknown struct type in member access");
+        node->data_type = TYPE_INT;
+        return;
+    }
+
+    Symbol *member = find_struct_member(struct_def, node->str_val);
+    if (!member) {
+        semantic_error(node->line_number,
+                       "Unknown struct member");
+        node->data_type = TYPE_INT;
+        return;
+    }
+
+    node->data_type = member->type;
+    node->pointer_level = member->pointer_level;
+    node->member_offset = member->offset;
+}
+
 void analyze_assignment(ASTNode *node) {
 
     analyze_node(node->left);
@@ -247,8 +438,9 @@ void analyze_assignment(ASTNode *node) {
         node->right->data_type == TYPE_VOID)
         return;  // don't cascade
 
-    /* LHS must be an lvalue: currently VAR, INDEX, or deref (*) */
+    /* LHS must be an lvalue: VAR, INDEX, MEMBER_ACCESS, or deref (*) */
     if (node->left->type != NODE_VAR && node->left->type != NODE_INDEX &&
+        node->left->type != NODE_MEMBER_ACCESS &&
         !(node->left->type == NODE_UN_OP && node->left->int_val == '*')) {
         semantic_error(node->line_number,
                        "Left-hand side of assignment must be a modifiable lvalue");
@@ -547,6 +739,10 @@ int analyze_node(ASTNode *node) {
 
     switch(node->type) {
 
+        case NODE_STRUCT_DEF:
+            analyze_struct_def(node);
+            return 0;
+
         case NODE_FUNC_DEF:
             analyze_function(node);
             return 0;
@@ -606,6 +802,10 @@ int analyze_node(ASTNode *node) {
             analyze_index(node);
             return 0;
 
+        case NODE_MEMBER_ACCESS:
+            analyze_member_access(node);
+            return 0;
+
         case NODE_CONST_INT:
             node->data_type = TYPE_INT;
             return 0;
@@ -654,6 +854,7 @@ int get_type_size(DataType t) {
     if (t == TYPE_INT) return 4;
     if (t == TYPE_CHAR) return 1;
     if (t == TYPE_VOID) return 0;
+    if (t == TYPE_STRUCT) return 0; // size unknown here (use struct_def->struct_size if available)
     return 4; // default
 }
 

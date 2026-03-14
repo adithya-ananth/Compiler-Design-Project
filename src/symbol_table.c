@@ -83,7 +83,13 @@ Symbol *create_symbol(char *name, DataType type,
     sym->is_array = 0;
     sym->array_size = 0;
 
-    // New fields
+    /* Struct-related */
+    sym->struct_def = NULL;
+    sym->struct_size = 0;
+    sym->members = NULL;
+    sym->offset = 0;
+
+    /* New fields */
     sym->pointer_level = 0;
     sym->array_dim_count = 0;
     sym->array_sizes = NULL;
@@ -147,10 +153,11 @@ Symbol *lookup(char *name) {
 
 const char* data_type_to_string(DataType type) {
     switch(type) {
-        case TYPE_INT:  return "int";
-        case TYPE_CHAR: return "char";
-        case TYPE_VOID: return "void";
-        default:        return "unknown";
+        case TYPE_INT:    return "int";
+        case TYPE_CHAR:   return "char";
+        case TYPE_VOID:   return "void";
+        case TYPE_STRUCT: return "struct";
+        default:          return "unknown";
     }
 }
 
@@ -161,6 +168,7 @@ const char* symbol_kind_to_string(SymbolKind kind) {
         case SYM_PARAMETER: return "parameter";
         case SYM_CONSTANT:  return "constant";
         case SYM_KEYWORD:   return "keyword";
+        case SYM_STRUCT:    return "struct";
         default:            return "unknown";
     }
 }
@@ -192,6 +200,12 @@ void print_scope(Scope *scope) {
                     }
                 }
                 printf("]");
+            }
+            if (sym->kind == SYM_STRUCT && sym->members) {
+                printf(" | Members:");
+                for (Symbol *m = sym->members; m; m = m->next) {
+                    printf(" %s(offset=%d)", m->name, m->offset);
+                }
             }
             printf("\n");
             sym = sym->next;

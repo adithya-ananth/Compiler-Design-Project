@@ -7,7 +7,8 @@
 typedef enum {
     TYPE_INT,
     TYPE_CHAR,
-    TYPE_VOID
+    TYPE_VOID,
+    TYPE_STRUCT
 } DataType;
 
 typedef enum {
@@ -15,7 +16,8 @@ typedef enum {
     SYM_FUNCTION,
     SYM_PARAMETER,
     SYM_CONSTANT,
-    SYM_KEYWORD
+    SYM_KEYWORD,
+    SYM_STRUCT
 } SymbolKind;
 
 typedef struct Symbol {
@@ -29,6 +31,16 @@ typedef struct Symbol {
     int offset;          // Offset relative to FP (s0)
     int local_vars_size; // For functions: total size of local variables
 
+
+    /* For struct types: points to struct definition symbol (SYM_STRUCT) */
+    struct Symbol *struct_def;
+    /* Size in bytes for struct types */
+    int struct_size;
+    /* List of members for struct definitions */
+    struct Symbol *members;
+
+    /* For member symbols (fields): offset within the struct */
+    int offset;
 
     /* Array information (for variables/parameters) */
     /* is_array: 1 if this symbol represents an array object */

@@ -31,6 +31,8 @@ const char* node_type_to_string(NodeType type) {
         case NODE_CONTINUE: return "CONTINUE";
         case NODE_ARRAY_DECL: return "ARRAY_DECL";
         case NODE_INDEX: return "INDEX";
+        case NODE_MEMBER_ACCESS: return "MEMBER_ACCESS";
+        case NODE_STRUCT_DEF: return "STRUCT_DEF";
         default: return "UNKNOWN";
     }
 }
@@ -155,6 +157,7 @@ ASTNode* create_node(NodeType type) {
     node->pointer_level = 0;
     node->array_dim_count = 0;
     node->array_dim_exprs = NULL;
+    node->member_offset = 0;
     return node;
 }
 
@@ -196,6 +199,9 @@ ASTNode* create_type_node(int type_token) {
             break;
         case T_VOID:
             node->data_type = TYPE_VOID;
+            break;
+        case T_STRUCT:
+            node->data_type = TYPE_STRUCT;
             break;
         default:
             node->data_type = TYPE_VOID;
@@ -442,6 +448,16 @@ void print_ast(ASTNode *node, int level) {
             print_ast(node->left, level + 2);
             print_indent(level + 1); printf("Index Expr:\n");
             print_ast(node->right, level + 2);
+            break;
+        case NODE_MEMBER_ACCESS:
+            printf("MemberAccess: %s\n", node->str_val);
+            print_indent(level + 1); printf("Base:\n");
+            print_ast(node->left, level + 2);
+            break;
+        case NODE_STRUCT_DEF:
+            printf("StructDef: %s\n", node->str_val);
+            print_indent(level + 1); printf("Members:\n");
+            print_ast(node->body, level + 2);
             break;
         case NODE_CONST_INT:
             printf("Int: %d\n", node->int_val);
