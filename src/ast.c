@@ -28,6 +28,7 @@ const char* node_type_to_string(NodeType type) {
         case NODE_SWITCH: return "SWITCH";
         case NODE_CASE: return "CASE";
         case NODE_BREAK: return "BREAK";
+        case NODE_CONTINUE: return "CONTINUE";
         case NODE_ARRAY_DECL: return "ARRAY_DECL";
         case NODE_INDEX: return "INDEX";
         default: return "UNKNOWN";
@@ -306,6 +307,10 @@ ASTNode* create_break_node(void) {
     return create_node(NODE_BREAK);
 }
 
+ASTNode* create_continue_node(void) {
+    return create_node(NODE_CONTINUE);
+}
+
 ASTNode* append_node(ASTNode *head, ASTNode *new_node) {
     if (!new_node) return head;
 
@@ -470,6 +475,9 @@ void print_ast(ASTNode *node, int level) {
             break;
         case NODE_BREAK:
             printf("Break\n");
+            break;
+        case NODE_CONTINUE:
+            printf("Continue\n");
             break;
         default:
             printf("Unknown Node\n");

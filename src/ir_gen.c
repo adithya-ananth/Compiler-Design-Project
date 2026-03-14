@@ -24,10 +24,12 @@ static void gen_stmt(ASTNode *node, IRInstr **list);
 static void get_index_info(ASTNode *node, char **base_name, IROperand *index_op, IRInstr **list, int line);
 static IROperand gen_index_expr(ASTNode *node, IRInstr **list, int line);
 
-/* Break target stack for loops and switches */
+/* Break/continue target stacks for loops and switches */
 #define MAX_BREAK_DEPTH 64
 static char *break_label_stack[MAX_BREAK_DEPTH];
 static int break_label_top = 0;
+static char *continue_label_stack[MAX_BREAK_DEPTH];
+static int continue_label_top = 0;
 
 static void push_break_label(const char *label) {
     if (break_label_top >= MAX_BREAK_DEPTH) return;
@@ -42,6 +44,21 @@ static void pop_break_label(void) {
 static const char *current_break_label(void) {
     if (break_label_top <= 0) return NULL;
     return break_label_stack[break_label_top - 1];
+}
+
+static void push_continue_label(const char *label) {
+    if (continue_label_top >= MAX_BREAK_DEPTH) return;
+    continue_label_stack[continue_label_top++] = strdup(label);
+}
+
+static void pop_continue_label(void) {
+    if (continue_label_top <= 0) return;
+    free(continue_label_stack[--continue_label_top]);
+}
+
+static const char *current_continue_label(void) {
+    if (continue_label_top <= 0) return NULL;
+    return continue_label_stack[continue_label_top - 1];
 }
 
 static void get_index_info(ASTNode *node, char **base_name, IROperand *index_op, IRInstr **list, int line) {
@@ -414,7 +431,9 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             gen_cond(node->cond, list, L_body, L_end, line);
             ir_append(list, ir_make_label(L_body, line));
             push_break_label(L_end);
+            push_continue_label(L_cond);
             gen_stmt(node->body, list);
+            pop_continue_label();
             pop_break_label();
             ir_append(list, ir_make_goto(L_cond, line));
             ir_append(list, ir_make_label(L_end, line));
@@ -427,6 +446,7 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
         case NODE_FOR: {
             char *L_cond = ir_new_label();
             char *L_body = ir_new_label();
+            char *L_continue = ir_new_label();
             char *L_end = ir_new_label();
             if (node->init && node->init->type != NODE_EMPTY)
                 gen_stmt(node->init, list);
@@ -437,14 +457,18 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
                 ir_append(list, ir_make_goto(L_body, line));
             ir_append(list, ir_make_label(L_body, line));
             push_break_label(L_end);
+            push_continue_label(L_continue);
             gen_stmt(node->body, list);
+            pop_continue_label();
             pop_break_label();
+            ir_append(list, ir_make_label(L_continue, line));
             if (node->incr)
                 (void)gen_expr(node->incr, list);
             ir_append(list, ir_make_goto(L_cond, line));
             ir_append(list, ir_make_label(L_end, line));
             free(L_cond);
             free(L_body);
+            free(L_continue);
             free(L_end);
             break;
         }
@@ -536,6 +560,14 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
 
         case NODE_BREAK: {
             const char *lbl = current_break_label();
+            if (lbl) {
+                ir_append(list, ir_make_goto((char *)lbl, line));
+            }
+            break;
+        }
+
+        case NODE_CONTINUE: {
+            const char *lbl = current_continue_label();
             if (lbl) {
                 ir_append(list, ir_make_goto((char *)lbl, line));
             }

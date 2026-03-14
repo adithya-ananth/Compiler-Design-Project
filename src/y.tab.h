@@ -66,17 +66,18 @@ extern int yydebug;
     T_CASE = 267,                  /* T_CASE  */
     T_DEFAULT = 268,               /* T_DEFAULT  */
     T_BREAK = 269,                 /* T_BREAK  */
-    T_IDENT = 270,                 /* T_IDENT  */
-    T_STRING_LIT = 271,            /* T_STRING_LIT  */
-    T_NUMBER = 272,                /* T_NUMBER  */
-    T_CHAR_LIT = 273,              /* T_CHAR_LIT  */
-    T_EQ = 274,                    /* T_EQ  */
-    T_NEQ = 275,                   /* T_NEQ  */
-    T_LE = 276,                    /* T_LE  */
-    T_GE = 277,                    /* T_GE  */
-    T_AND = 278,                   /* T_AND  */
-    T_OR = 279,                    /* T_OR  */
-    LOWER_THAN_ELSE = 280          /* LOWER_THAN_ELSE  */
+    T_CONTINUE = 270,              /* T_CONTINUE  */
+    T_IDENT = 271,                 /* T_IDENT  */
+    T_STRING_LIT = 272,            /* T_STRING_LIT  */
+    T_NUMBER = 273,                /* T_NUMBER  */
+    T_CHAR_LIT = 274,              /* T_CHAR_LIT  */
+    T_EQ = 275,                    /* T_EQ  */
+    T_NEQ = 276,                   /* T_NEQ  */
+    T_LE = 277,                    /* T_LE  */
+    T_GE = 278,                    /* T_GE  */
+    T_AND = 279,                   /* T_AND  */
+    T_OR = 280,                    /* T_OR  */
+    LOWER_THAN_ELSE = 281          /* LOWER_THAN_ELSE  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -91,7 +92,7 @@ union YYSTYPE
     char *str;
     struct ASTNode *node;
 
-#line 95 "build/y.tab.h"
+#line 96 "build/y.tab.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

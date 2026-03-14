@@ -32,7 +32,7 @@ ASTNode *root = NULL;
 
 /* Tokens */
 %token <intval> T_INT T_VOID T_CHAR
-%token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK
+%token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK T_CONTINUE
 %token <str>    T_IDENT T_STRING_LIT
 %token <intval> T_NUMBER T_CHAR_LIT
 
@@ -296,6 +296,10 @@ jump_statement
     }
     | T_BREAK ';' {
         $$ = create_break_node();
+        SET_LINE($$);
+    }
+    | T_CONTINUE ';' {
+        $$ = create_continue_node();
         SET_LINE($$);
     }
     ;

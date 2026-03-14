@@ -7,6 +7,7 @@
 static Symbol *current_function = NULL;
 int semantic_errors = 0;
 static int break_context_depth = 0;
+static int loop_context_depth = 0;
 
 static int current_local_offset = 0;
 static int current_param_offset = 16; /* standard positive offset for arg passing */
@@ -442,7 +443,9 @@ int analyze_while(ASTNode *node) {
 
 
     break_context_depth++;
+    loop_context_depth++;
     analyze_node(node->body);
+    loop_context_depth--;
     break_context_depth--;
 
     return 0;
@@ -466,7 +469,9 @@ int analyze_for(ASTNode *node) {
         analyze_node(node->incr);
 
     break_context_depth++;
+    loop_context_depth++;
     analyze_node(node->body);
+    loop_context_depth--;
     break_context_depth--;
 
     return 0;
@@ -575,6 +580,13 @@ int analyze_node(ASTNode *node) {
             if (break_context_depth <= 0) {
                 semantic_error(node->line_number,
                                "break statement not within loop or switch");
+            }
+            return 0;
+
+        case NODE_CONTINUE:
+            if (loop_context_depth <= 0) {
+                semantic_error(node->line_number,
+                               "continue statement not within loop");
             }
             return 0;
 

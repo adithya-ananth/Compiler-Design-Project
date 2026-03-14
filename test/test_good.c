@@ -6,8 +6,11 @@ char foo(int x, int y) {
     int i;
     for(i=0; i< 5; i = i+1)
     {
-	int j;
-	j = i*2;
+	    int j;
+	    j = i*2;
+        if (j > 5) {
+            break;
+        }
     }
     char z;
     return z;

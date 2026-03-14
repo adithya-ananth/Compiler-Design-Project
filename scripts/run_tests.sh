@@ -13,7 +13,7 @@ else
     # Batch validation: pass/fail only (no ir.txt left behind)
     rm -f ir.txt
     PASS=0 FAIL=0
-    for f in test/add.c test/test_good.c test/test_func_call.c; do
+    for f in test/add.c test/test_good.c test/test_func_call.c test/continue.c; do
         if $PARSER "$f" > /dev/null 2>&1; then PASS=$((PASS+1)); else FAIL=$((FAIL+1)); fi
     done
     if $PARSER test/test_bad.c > /dev/null 2>&1; then FAIL=$((FAIL+1)); else PASS=$((PASS+1)); fi

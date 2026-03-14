@@ -25,6 +25,7 @@ typedef enum {
     NODE_SWITCH,
     NODE_CASE,
     NODE_BREAK,
+    NODE_CONTINUE,
     /* Arrays */
     NODE_ARRAY_DECL,   /* array declaration */
     NODE_INDEX         /* a[i] indexing expression */
@@ -81,6 +82,7 @@ ASTNode* create_index_node(ASTNode *base, ASTNode *index);
 ASTNode* create_switch_node(ASTNode *cond, ASTNode *cases);
 ASTNode* create_case_node(ASTNode *expr, ASTNode *body);
 ASTNode* create_break_node(void);
+ASTNode* create_continue_node(void);
 
 // List manipulation
 ASTNode* append_node(ASTNode *head, ASTNode *new_node);

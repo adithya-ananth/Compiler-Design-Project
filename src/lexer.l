@@ -34,6 +34,7 @@ const char *token_name(int token) {
         case T_CASE:    return "T_CASE";
         case T_DEFAULT: return "T_DEFAULT";
         case T_BREAK:   return "T_BREAK";
+        case T_CONTINUE:return "T_CONTINUE";
 
         case T_IDENT:   return "T_IDENT";
         case T_NUMBER:  return "T_NUMBER";
@@ -91,6 +92,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "case"      { SAVE_POS(); ADVANCE(); return T_CASE; }
 "default"   { SAVE_POS(); ADVANCE(); return T_DEFAULT; }
 "break"     { SAVE_POS(); ADVANCE(); return T_BREAK; }
+"continue"  { SAVE_POS(); ADVANCE(); return T_CONTINUE; }
 
  /* ---------- Multi-char operators ---------- */
 "=="        { SAVE_POS(); ADVANCE(); return T_EQ; }
