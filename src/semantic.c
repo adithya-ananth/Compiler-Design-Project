@@ -66,9 +66,35 @@ void semantic_error(int line, const char *msg) {
     semantic_errors++;
 }
 
+const char* type_to_string(DataType t) {
+    switch (t) {
+        case TYPE_INT: return "int";
+        case TYPE_CHAR: return "char";
+        case TYPE_VOID: return "void";
+        case TYPE_STRUCT: return "struct";
+        default: return "unknown";
+    }
+}
 
-const char* type_to_string(DataType t);
-char* get_mangled_name(const char *prefix, const char *name, ASTNode *params);
+char* get_mangled_name(const char *prefix, const char *name, ASTNode *params) {
+    char buf[512];
+    if (prefix)
+        snprintf(buf, sizeof(buf), "%s_%s", prefix, name);
+    else
+        snprintf(buf, sizeof(buf), "%s", name);
+    
+    ASTNode *p = params;
+    while (p) {
+        if (p->str_val && strcmp(p->str_val, "this") == 0) {
+            p = p->next;
+            continue;
+        }
+        strcat(buf, "_");
+        strcat(buf, type_to_string(p->left->data_type));
+        p = p->next;
+    }
+    return strdup(buf);
+}
 
 const char* type_to_string(DataType t) {
     switch (t) {
