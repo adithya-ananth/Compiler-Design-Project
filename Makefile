@@ -14,7 +14,9 @@ OBJS = $(BUILD_DIR)/y.tab.o \
        $(BUILD_DIR)/symbol_table.o \
        $(BUILD_DIR)/semantic.o \
        $(BUILD_DIR)/ir.o \
-       $(BUILD_DIR)/ir_gen.o
+       $(BUILD_DIR)/ir_gen.o \
+       $(BUILD_DIR)/ir_opt.o \
+       $(BUILD_DIR)/riscv_gen.o
 
 all: setup parser
 
@@ -43,4 +45,4 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR) ast.dot ir.txt
+	rm -rf $(BUILD_DIR) ast.dot ir.txt output.s

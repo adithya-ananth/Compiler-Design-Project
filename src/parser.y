@@ -6,6 +6,8 @@
 #include "symbol_table.h"
 #include "semantic.h"
 #include "ir_gen.h"
+#include "ir_opt.h"
+#include "riscv_gen.h"
 
 void print_vtables() {
     Scope *global = current_scope;
@@ -706,6 +708,10 @@ int main(int argc, char **argv) {
             ir_print_program(ir);
             print_vtables();
             ir_export_to_file(ir, "ir.txt");
+
+            ir_optimize(ir);
+            riscv_generate(ir, "output.s");
+            
             ir_free_program(ir);
           }
         }
