@@ -1,5 +1,4 @@
 CC = gcc
-# search build directory first so generated headers are used
 CFLAGS = -Wall -g -I./build -I./src
 BISON = bison
 FLEX = flex
@@ -29,8 +28,6 @@ parser: $(OBJS)
 
 $(BUILD_DIR)/y.tab.c $(BUILD_DIR)/y.tab.h: $(SRC_DIR)/parser.y
 	$(BISON) -t -d -o $(BUILD_DIR)/y.tab.c $(SRC_DIR)/parser.y
-	# keep a copy of header in src so other tools can access it (make include path handles build first)
-	cp $(BUILD_DIR)/y.tab.h $(SRC_DIR)/y.tab.h
 
 $(BUILD_DIR)/lex.yy.c: $(SRC_DIR)/lexer.l $(BUILD_DIR)/y.tab.h
 	$(FLEX) -o $(BUILD_DIR)/lex.yy.c $(SRC_DIR)/lexer.l
