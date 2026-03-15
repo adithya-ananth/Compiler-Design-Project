@@ -67,6 +67,39 @@ void semantic_error(int line, const char *msg) {
 }
 
 
+const char* type_to_string(DataType t);
+char* get_mangled_name(const char *prefix, const char *name, ASTNode *params);
+
+const char* type_to_string(DataType t) {
+    switch (t) {
+        case TYPE_INT: return "int";
+        case TYPE_CHAR: return "char";
+        case TYPE_VOID: return "void";
+        case TYPE_STRUCT: return "struct";
+        default: return "unknown";
+    }
+}
+
+char* get_mangled_name(const char *prefix, const char *name, ASTNode *params) {
+    char buf[512];
+    if (prefix)
+        snprintf(buf, sizeof(buf), "%s_%s", prefix, name);
+    else
+        snprintf(buf, sizeof(buf), "%s", name);
+    
+    ASTNode *p = params;
+    while (p) {
+        if (p->str_val && strcmp(p->str_val, "this") == 0) {
+            p = p->next;
+            continue;
+        }
+        strcat(buf, "_");
+        strcat(buf, type_to_string(p->left->data_type));
+        p = p->next;
+    }
+    return strdup(buf);
+}
+
 void analyze_struct_def(ASTNode *node) {
     if (!node || node->type != NODE_STRUCT_DEF) return;
 
@@ -141,20 +174,57 @@ void analyze_struct_def(ASTNode *node) {
 
         if (member->type == NODE_FUNC_DEF) {
             char mangled_name[256];
-            snprintf(mangled_name, sizeof(mangled_name), "%s_%s", sym->name, member->str_val);
+            if (member->is_constructor) {
+                snprintf(mangled_name, sizeof(mangled_name), "%s__ctor", sym->name);
+            } else if (member->is_destructor) {
+                snprintf(mangled_name, sizeof(mangled_name), "%s__dtor", sym->name);
+            } else {
+                char *new_mangled = get_mangled_name(sym->name, member->str_val, member->params);
+                strncpy(mangled_name, new_mangled, sizeof(mangled_name));
+                free(new_mangled);
+            }
             char *orig_name = member->str_val;
             member->str_val = strdup(mangled_name);
 
+            /* Prepend implicit 'this' parameter if not present */
+            int has_this = 0;
+            for (ASTNode *p = member->params; p; p = p->next) {
+                if (p->str_val && strcmp(p->str_val, "this") == 0) {
+                    has_this = 1;
+                    break;
+                }
+            }
+            if (!has_this) {
+                ASTNode *this_type = create_node(NODE_TYPE);
+                this_type->data_type = TYPE_STRUCT;
+                this_type->str_val = strdup(sym->name);
+                this_type->pointer_level = 1;
+                
+                ASTNode *this_param = create_node(NODE_PARAM);
+                this_param->str_val = strdup("this");
+                this_param->left = this_type;
+                this_param->line_number = member->line_number;
+                
+                this_param->next = member->params;
+                member->params = this_param;
+            }
+
             analyze_function(member);
             Symbol *func = lookup(member->str_val);
-            member->str_val = orig_name; // Restore AST
+            if (func) {
+                Symbol *m = create_symbol(orig_name, func->type, SYM_FUNCTION, member->line_number);
+                m->unmangled_name = strdup(member->str_val);
+                m->access_modifier = current_access;
+                m->next_member = sym->members;
+                sym->members = m;
+            }
 
             if (func) {
                 func->unmangled_name = strdup(orig_name);
                 func->access_modifier = current_access;
-                if (member->is_virtual) {
+                Symbol *existing_v = find_virtual_method(sym, orig_name);
+                if (member->is_virtual || existing_v) {
                     func->is_virtual = 1;
-                    Symbol *existing_v = find_virtual_method(sym, orig_name);
                     if (existing_v) {
                         func->vtable_index = existing_v->vtable_index;
                         replace_virtual_method(sym, func);
@@ -164,6 +234,7 @@ void analyze_struct_def(ASTNode *node) {
                     }
                 }
             }
+            free(orig_name);
             continue;
         }
 
@@ -242,6 +313,8 @@ void analyze_struct_def(ASTNode *node) {
     
     current_class = NULL;
 }
+
+void analyze_member_access(ASTNode *node);
 
 void analyze_function(ASTNode *node) {
 
@@ -328,6 +401,10 @@ void analyze_function(ASTNode *node) {
 
         sym->frame_offset = current_param_offset;
         current_param_offset += 4; /* Assign 4 bytes per parameter (assuming 32-bit pointers/ints) */
+
+        if (param->left->data_type == TYPE_STRUCT && param->left->str_val) {
+            sym->struct_def = lookup(param->left->str_val);
+        }
 
         if (!insert_symbol(sym))
             semantic_error(param->line_number, "Parameter redeclared");
@@ -461,6 +538,21 @@ int analyze_block(ASTNode *node) {
 void analyze_variable(ASTNode *node) {
 
     Symbol *sym = lookup(node->str_val);
+    
+    if (!sym && current_class) {
+        Symbol *m = find_struct_member(current_class, node->str_val);
+        if (m) {
+            /* Transform into member access: this.member */
+            char *member_name = node->str_val; // strdup? node already owns it
+            node->type = NODE_MEMBER_ACCESS;
+            node->left = create_var_node("this");
+            node->left->line_number = node->line_number;
+            node->str_val = member_name;
+            node->int_val = 0; // dot access
+            analyze_member_access(node);
+            return;
+        }
+    }
 
     if (!sym) {
         semantic_error(node->line_number,
@@ -535,6 +627,7 @@ void analyze_member_access(ASTNode *node) {
         node->data_type = TYPE_INT;
         return;
     }
+    node->member_sym = member;
 
     if (member->access_modifier == 1) { // Private
         // In CD2, methods are processed while current_class is set. 
@@ -657,41 +750,36 @@ void analyze_function_call(ASTNode *node) {
         sym = lookup(node->left->str_val);
     } else if (node->left->type == NODE_MEMBER_ACCESS) {
         /* Method call: find the method in the struct */
-        /* For now, assume it's a virtual method */
-        /* node->left->str_val is member name */
-        /* But we need to get the struct type from the base */
-        /* For simplicity, lookup the function by name */
-        /* For method calls, we may need to get the mangled function symbol */
-        /* node->left->str_val is member name, structure was resolved in analyze_member_access */
-        sym = lookup(node->left->str_val);
-        // for method call we need to find the mangled name.
-        if (node->left->struct_def) {
-            char mangled_name[256];
-            snprintf(mangled_name, sizeof(mangled_name), "%s_%s", node->left->struct_def->name, node->left->str_val);
-            sym = lookup(mangled_name);
-            if (!sym) {
-                // Check base class methods recursively or through virtual_methods list
-                Symbol *v = node->left->struct_def->virtual_methods;
-                while (v) {
-                    if (v->unmangled_name && strcmp(v->unmangled_name, node->left->str_val) == 0) {
-                        sym = lookup(v->name);
-                        break;
-                    }
-                    v = v->next_member;
-                }
+        if (node->left->member_sym && node->left->member_sym->kind == SYM_FUNCTION) {
+            sym = node->left->member_sym;
+            /* Overload resolution: generate mangled name with actual arg types */
+            char buf[512] = "";
+            snprintf(buf, sizeof(buf), "%s_%s", node->left->struct_def->name, node->left->str_val);
+            
+            ASTNode *arg = node->right;
+            while (arg) {
+                analyze_node(arg);
+                strcat(buf, "_");
+                strcat(buf, type_to_string(arg->data_type));
+                arg = arg->next;
+            }
+            Symbol *overload = lookup(buf);
+            if (overload) sym = overload;
+            else {
+                /* Try backward compatible name if no overloading was used */
+                char fallback[256];
+                snprintf(fallback, sizeof(fallback), "%s_%s", node->left->struct_def->name, node->left->str_val);
+                Symbol *fb = lookup(fallback);
+                if (fb) sym = fb;
             }
         }
-        if (sym && sym->is_virtual) {
-            node->is_virtual_call = 1;
+        if (sym && (sym->is_virtual || node->left->type == NODE_MEMBER_ACCESS)) {
+            if (sym->is_virtual) node->is_virtual_call = 1;
             node->call_struct = node->left->struct_def;
             /* Add the object as first argument */
             ASTNode *obj_expr = node->left->left;
             /* For pointer, pass as is; for value, take address */
-            /* Assume for struct value, passing by value. Since unary & is not supported
-               we just keep or mock evaluating the object. */
-            if (obj_expr->data_type == TYPE_STRUCT && obj_expr->pointer_level == 0) {
-                obj_expr = create_unary_node('*', obj_expr);
-            }
+            /* Assume for struct value, passing by value. */
             // Prepend obj_expr to arg list
             obj_expr->next = node->right;
             node->right = obj_expr;

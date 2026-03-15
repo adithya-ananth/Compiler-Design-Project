@@ -170,6 +170,9 @@ ASTNode* create_node(NodeType type) {
     node->call_struct = NULL;
     node->func_sym = NULL;
     node->struct_def = NULL;
+    node->member_sym = NULL;
+    node->is_constructor = 0;
+    node->is_destructor = 0;
     return node;
 }
 

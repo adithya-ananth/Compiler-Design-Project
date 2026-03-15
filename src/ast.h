@@ -74,12 +74,17 @@ typedef struct ASTNode {
     struct Symbol *func_sym;
     // For member access: the struct type
     struct Symbol *struct_def;
+    // For member access: the resolved member symbol
+    struct Symbol *member_sym;
     // For class/struct def: is class
     int is_class;
     // For class def: base class name
     char *base_class_name;
     // For access modifiers inside structs/classes (0=public, 1=private, 2=protected)
     int access_modifier;
+    // New: constructor and destructor flags
+    int is_constructor;
+    int is_destructor;
 } ASTNode;
 
 

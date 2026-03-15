@@ -1,0 +1,111 @@
+gcc -Wall -g -I./build -I./src -DYYDEBUG=1 -o build/parser build/y.tab.o build/lex.yy.o build/ast.o build/symbol_table.o build/semantic.o build/ir.o build/ir_gen.o
+Parsing...
+Declaring d at scope level 2
+
+=========== SYMBOL TABLE ===========
+Scope Level: 2
+Name: d          | Type: struct | Kind: variable  | Line: 18 | Scope: 2 | Offset: -16
+------------------------------------
+Scope Level: 1
+------------------------------------
+Scope Level: 2
+------------------------------------
+Scope Level: 1
+Name: this       | Type: struct | Kind: parameter | Line: 13 | Scope: 1 | Offset: 16
+------------------------------------
+Scope Level: 2
+------------------------------------
+Scope Level: 1
+Name: this       | Type: struct | Kind: parameter | Line: 4 | Scope: 1 | Offset: 16
+------------------------------------
+Scope Level: 0
+Name: Derived_func | Type: void   | Kind: function  | Line: 14 | Scope: 0 | Offset: 0 | L_Size: 0
+Name: main       | Type: int    | Kind: function  | Line: 24 | Scope: 0 | Offset: 0 | L_Size: 16
+Name: Base       | Type: struct | Kind: struct    | Line: 8 | Scope: 0 | Offset: 0 | Members: priv_x(offset=8) func(offset=4) pub_x(offset=4) | Virtual Methods: Base_func(v_idx=0)
+Name: Derived    | Type: struct | Kind: struct    | Line: 15 | Scope: 0 | Offset: 0 | Members: func(offset=0) derived_x(offset=12) pub_x(offset=4) func(offset=4) priv_x(offset=8) | Virtual Methods: Derived_func(v_idx=0)
+Name: Base_func  | Type: void   | Kind: function  | Line: 5 | Scope: 0 | Offset: 0 | L_Size: 0
+------------------------------------
+====================================
+Semantic analysis successful.
+
+=========== IR (Three-Address Code) ===========
+function main:
+  *d = vtable_Derived
+d[1] = 10
+d[3] = 20
+  t0 = *d
+  t1 = *t0
+  param d
+  call *t1, 1
+  return 0
+
+function Derived_func:
+
+function Base_func:
+
+===============================================
+vtable_Base:
+  .word Base_func
+vtable_Derived:
+  .word Derived_func
+Parsing Done with 0 errors
+AST Structure:
+StructDef: Base
+  Members:
+    AccessSpec: public
+    VarDecl: pub_x
+      Type (token 258)
+    FunctionDef: Base_func
+      Return Type:
+        Type (token 259)
+      Params:
+        Param: this
+          Type:
+            Type (token 263)
+      Body:
+        Block
+    AccessSpec: private
+    VarDecl: priv_x
+      Type (token 258)
+StructDef: Derived
+  Base Class: Base
+  Members:
+    AccessSpec: public
+    VarDecl: derived_x
+      Type (token 258)
+    FunctionDef: Derived_func
+      Return Type:
+        Type (token 259)
+      Params:
+        Param: this
+          Type:
+            Type (token 263)
+      Body:
+        Block
+FunctionDef: main
+  Return Type:
+    Type (token 258)
+  Params:
+  Body:
+    Block
+      VarDecl: d
+        Type (token 263)
+      Assign
+        MemberAccess: pub_x
+          Base:
+            Var: d
+        Int: 10
+      Assign
+        MemberAccess: derived_x
+          Base:
+            Var: d
+        Int: 20
+      FuncCall: <dynamic>
+        Callee:
+          MemberAccess: func
+            Base:
+              Var: d
+        Args:
+          Var: d
+      Return
+        Int: 0

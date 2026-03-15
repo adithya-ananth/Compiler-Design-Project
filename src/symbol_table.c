@@ -204,10 +204,18 @@ void print_scope(Scope *scope) {
                 }
                 printf("]");
             }
-            if (sym->kind == SYM_STRUCT && sym->members) {
-                printf(" | Members:");
-                for (Symbol *m = sym->members; m; m = m->next_member) {
-                    printf(" %s(offset=%d)", m->name, m->struct_offset);
+            if (sym->kind == SYM_STRUCT && (sym->members || sym->virtual_methods)) {
+                if (sym->members) {
+                    printf(" | Members:");
+                    for (Symbol *m = sym->members; m; m = m->next_member) {
+                        printf(" %s(offset=%d)", m->name, m->struct_offset);
+                    }
+                }
+                if (sym->virtual_methods) {
+                    printf(" | Virtual Methods:");
+                    for (Symbol *m = sym->virtual_methods; m; m = m->next_member) {
+                        printf(" %s(v_idx=%d)", m->name, m->vtable_index);
+                    }
                 }
             }
             printf("\n");

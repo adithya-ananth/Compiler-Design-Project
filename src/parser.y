@@ -58,7 +58,7 @@ ASTNode *root = NULL;
 %token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK T_CONTINUE
 %token <str>    T_IDENT T_STRING_LIT
 %token <intval> T_NUMBER T_CHAR_LIT
-%token <intval> T_ARROW
+%token <intval> T_ARROW T_TILDE
 
 /* Operators */
 %token T_EQ T_NEQ T_LE T_GE T_AND T_OR
@@ -264,13 +264,18 @@ direct_declarator
     }
     ;
 
-type_specifier
-    : T_INT  { $$ = create_type_node(T_INT);  SET_LINE($$); }
-    | T_VOID { $$ = create_type_node(T_VOID); SET_LINE($$); }
-    | T_CHAR { $$ = create_type_node(T_CHAR); SET_LINE($$); }
-    | struct_specifier { $$ = $1; }
-    | class_specifier { $$ = $1; }
-    ;
+type_specifier: T_INT { $$ = create_type_node(T_INT); }
+               | T_CHAR { $$ = create_type_node(T_CHAR); }
+               | T_VOID { $$ = create_type_node(T_VOID); }
+               | struct_specifier { $$ = $1; }
+               | class_specifier { $$ = $1; }
+               | T_IDENT { 
+                   $$ = create_node(NODE_TYPE); 
+                   $$->str_val = strdup($1); 
+                   $$->data_type = TYPE_STRUCT; 
+                   SET_LINE($$);
+               }
+               ;
 
 struct_specifier
     : T_STRUCT T_IDENT '{' struct_declaration_list '}' {
@@ -328,6 +333,24 @@ struct_member
         $$ = $2;
     }
     | function_definition { $$ = $1; }
+    | T_IDENT '(' parameter_list ')' compound_statement {
+        /* Constructor with params */
+        $$ = create_func_def(create_type_node(T_VOID), $1, $3, $5);
+        $$->is_constructor = 1;
+        SET_LINE($$);
+    }
+    | T_IDENT '(' ')' compound_statement {
+        /* Constructor without params */
+        $$ = create_func_def(create_type_node(T_VOID), $1, NULL, $4);
+        $$->is_constructor = 1;
+        SET_LINE($$);
+    }
+    | T_TILDE T_IDENT '(' ')' compound_statement {
+        /* Destructor */
+        $$ = create_func_def(create_type_node(T_VOID), $2, NULL, $5);
+        $$->is_destructor = 1;
+        SET_LINE($$);
+    }
     | T_PUBLIC T_COLON {
         ASTNode *node = create_node(NODE_ACCESS_SPEC);
         SET_LINE(node);
@@ -706,12 +729,9 @@ int main(int argc, char **argv) {
           IRProgram *ir = ir_generate(root);
           if (ir) {
             ir_print_program(ir);
-            print_vtables();
             ir_export_to_file(ir, "ir.txt");
-
-            ir_optimize(ir);
-            riscv_generate(ir, "output.s");
-            
+            ir_optimize(ir);                 
+            riscv_generate(ir, "output.s");  
             ir_free_program(ir);
           }
         }

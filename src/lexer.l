@@ -128,6 +128,7 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "!"         { SAVE_POS(); ADVANCE(); return '!'; }
 "&"         { SAVE_POS(); ADVANCE(); return '&'; }
 "."         { SAVE_POS(); ADVANCE(); return '.'; }
+"~"         { SAVE_POS(); ADVANCE(); return T_TILDE; }
 
  /* ---------- Delimiters ---------- */
 ";"         { SAVE_POS(); ADVANCE(); return ';'; }

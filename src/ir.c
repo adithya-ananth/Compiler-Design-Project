@@ -130,8 +130,8 @@ IRInstr* ir_make_call_indirect(char *dst, IROperand fn_ptr, int nargs, int line)
     IRInstr *i = calloc(1, sizeof(IRInstr));
     i->kind = IR_CALL_INDIRECT;
     i->line = line;
-    i->result = dst;
-    i->base = fn_ptr;
+    i->result = dst ? strdup(dst) : NULL;
+    i->base = op_dup(&fn_ptr);
     i->arg_count = nargs;
     return i;
 }
@@ -499,65 +499,69 @@ void ir_free_operand(IROperand *op) {
 }
 
 void ir_free_instr(IRInstr *instr) {
-    if (!instr) return;
-    switch (instr->kind) {
-        case IR_ASSIGN:
-            if (instr->result) free(instr->result);
-            if (instr->src.name) free(instr->src.name);
-            break;
-        case IR_BINOP:
-            if (instr->result) free(instr->result);
-            if (instr->left.name) free(instr->left.name);
-            if (instr->right.name) free(instr->right.name);
-            break;
-        case IR_UNOP:
-            if (instr->result) free(instr->result);
-            if (instr->unop_src.name) free(instr->unop_src.name);
-            break;
-        case IR_PARAM:
-            if (instr->src.name) free(instr->src.name);
-            break;
-        case IR_CALL:
-            if (instr->result) free(instr->result);
-            if (instr->call_fn) free(instr->call_fn);
-            break;
-        case IR_CALL_INDIRECT:
-            if (instr->result) free(instr->result);
-            if (instr->base.name) free(instr->base.name);
-            break;
-        case IR_RETURN:
-            if (instr->src.name) free(instr->src.name);
-            break;
-        case IR_LABEL:
-        case IR_GOTO:
-        case IR_IF:
-            if (instr->label) free(instr->label);
-            if (instr->kind == IR_IF) {
-                if (instr->if_left.name) free(instr->if_left.name);
-                if (instr->if_right.name) free(instr->if_right.name);
-            }
-            break;
-        case IR_LOAD:
-            if (instr->result) free(instr->result);
-            if (instr->base.name) free(instr->base.name);
-            if (instr->index.name) free(instr->index.name);
-            break;
-        case IR_STORE:
-            if (instr->base.name) free(instr->base.name);
-            if (instr->index.name) free(instr->index.name);
-            if (instr->store_val.name) free(instr->store_val.name);
-            break;
+    while (instr) {
+        IRInstr *next = instr->next;
+        switch (instr->kind) {
+            case IR_ASSIGN:
+                if (instr->result) free(instr->result);
+                if (instr->src.name) free(instr->src.name);
+                break;
+            case IR_BINOP:
+                if (instr->result) free(instr->result);
+                if (instr->left.name) free(instr->left.name);
+                if (instr->right.name) free(instr->right.name);
+                break;
+            case IR_UNOP:
+                if (instr->result) free(instr->result);
+                if (instr->unop_src.name) free(instr->unop_src.name);
+                break;
+            case IR_PARAM:
+                if (instr->src.name) free(instr->src.name);
+                break;
+            case IR_CALL:
+                if (instr->result) free(instr->result);
+                if (instr->call_fn) free(instr->call_fn);
+                break;
+            case IR_CALL_INDIRECT:
+                if (instr->result) free(instr->result);
+                if (instr->base.name) free(instr->base.name);
+                break;
+            case IR_RETURN:
+                if (instr->src.name) free(instr->src.name);
+                break;
+            case IR_LABEL:
+            case IR_GOTO:
+            case IR_IF:
+                if (instr->label) free(instr->label);
+                if (instr->kind == IR_IF) {
+                    if (instr->if_left.name) free(instr->if_left.name);
+                    if (instr->if_right.name) free(instr->if_right.name);
+                }
+                break;
+            case IR_LOAD:
+                if (instr->result) free(instr->result);
+                if (instr->base.name) free(instr->base.name);
+                if (instr->index.name) free(instr->index.name);
+                break;
+            case IR_STORE:
+                if (instr->base.name) free(instr->base.name);
+                if (instr->index.name) free(instr->index.name);
+                if (instr->store_val.name) free(instr->store_val.name);
+                break;
+        }
+        free(instr);
+        instr = next;
     }
-    ir_free_instr(instr->next);
-    free(instr);
 }
 
 void ir_free_func(IRFunc *f) {
-    if (!f) return;
-    if (f->name) free(f->name);
-    ir_free_instr(f->instrs);
-    ir_free_func(f->next);
-    free(f);
+    while (f) {
+        IRFunc *next = f->next;
+        if (f->name) free(f->name);
+        ir_free_instr(f->instrs);
+        free(f);
+        f = next;
+    }
 }
 
 void ir_free_program(IRProgram *prog) {
