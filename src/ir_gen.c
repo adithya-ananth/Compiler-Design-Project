@@ -574,7 +574,7 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             ir_append(list, ir_make_label(L_cond, line));
             gen_cond(node->cond, list, L_body, L_end, line);
             ir_append(list, ir_make_label(L_body, line));
-            gen_stmt(node->left, list);
+            gen_stmt(node->body, list);
             ir_append(list, ir_make_goto(L_cond, line));
             ir_append(list, ir_make_label(L_end, line));
             pop_break_label();

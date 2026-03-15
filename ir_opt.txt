@@ -1,0 +1,37 @@
+function main:
+  i := 0
+L0:
+  if i < 5 goto L1
+  goto L2
+L1:
+  t0 := i + 1
+  i := t0
+  if i == 3 goto L3
+  goto L5
+L3:
+  goto L0
+L5:
+  t1 := i + 10
+  i := t1
+  goto L0
+L2:
+  j := 0
+L6:
+  if j < 5 goto L7
+  goto L9
+L7:
+  if j == 2 goto L10
+  goto L12
+L10:
+  goto L8
+L12:
+  t2 := i + j
+  i := t2
+L8:
+  t3 := j + 1
+  j := t3
+  goto L6
+L9:
+  t4 := i + j
+  return t4
+

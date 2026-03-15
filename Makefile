@@ -14,7 +14,8 @@ OBJS = $(BUILD_DIR)/y.tab.o \
        $(BUILD_DIR)/symbol_table.o \
        $(BUILD_DIR)/semantic.o \
        $(BUILD_DIR)/ir.o \
-       $(BUILD_DIR)/ir_gen.o
+       $(BUILD_DIR)/ir_gen.o \
+       $(BUILD_DIR)/ir_opt.o
 
 all: setup parser
 

@@ -6,6 +6,7 @@
 #include "symbol_table.h"
 #include "semantic.h"
 #include "ir_gen.h"
+#include "ir_opt.h"
 
 void print_vtables() {
     Scope *global = current_scope;
@@ -729,6 +730,14 @@ int main(int argc, char **argv) {
             ir_print_program(ir);
             print_vtables();
             ir_export_to_file(ir, "ir.txt");
+            
+            /* Optimization pass */
+            printf("Optimizing IR...\n");
+            optimize_program(ir);
+            printf("Optimization complete. Optimized IR printed below:\n");
+            ir_print_program(ir);
+            ir_export_to_file(ir, "ir_opt.txt");
+
             ir_free_program(ir);
           }
         }
