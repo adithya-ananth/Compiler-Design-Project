@@ -17,11 +17,9 @@ The implementation follows the classical compiler pipeline:
 The compiler generates a simple three-address IR from the AST. After semantic analysis, run the following:
 
 ```bash
+make clean
 make
-```
-
-```bash
-./build/parser test/<source.c>
+./build/parser < ./test/<source.c>
 ```
 
 IR is printed to stdout and exported to `ir.txt`. Run validation:
