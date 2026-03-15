@@ -114,59 +114,6 @@ static void exit_dtor_scope(IRInstr **list, int line) {
     }
 }
 
-/* Destructor scope tracking */
-typedef struct {
-    char *var_name;
-    char *dtor_name;
-} DtorInfo;
-
-#define MAX_DTOR_STACK 256
-static DtorInfo dtor_stack[MAX_DTOR_STACK];
-static int dtor_top = 0;
-static int dtor_scope_markers[MAX_BREAK_DEPTH];
-static int dtor_scope_depth = 0;
-
-static void push_dtor(const char *var, const char *dtor) {
-    if (dtor_top < MAX_DTOR_STACK) {
-        dtor_stack[dtor_top].var_name = strdup(var);
-        dtor_stack[dtor_top].dtor_name = strdup(dtor);
-        dtor_top++;
-    }
-}
-
-static void pop_dtors_to(int target_top, IRInstr **list, int line) {
-    for (int i = dtor_top - 1; i >= target_top; i--) {
-        IROperand self = ir_op_name(dtor_stack[i].var_name);
-        ir_append(list, ir_make_param(self, line));
-        ir_append(list, ir_make_call_void(dtor_stack[i].dtor_name, 1, line));
-        if (self.name) free(self.name);
-        free(dtor_stack[i].var_name);
-        free(dtor_stack[i].dtor_name);
-    }
-    dtor_top = target_top;
-}
-
-static void emit_dtors_up_to(int target_top, IRInstr **list, int line) {
-    for (int i = dtor_top - 1; i >= target_top; i--) {
-        IROperand self = ir_op_name(dtor_stack[i].var_name);
-        ir_append(list, ir_make_param(self, line));
-        ir_append(list, ir_make_call_void(dtor_stack[i].dtor_name, 1, line));
-        if (self.name) free(self.name);
-    }
-}
-
-static void enter_dtor_scope() {
-    if (dtor_scope_depth < MAX_BREAK_DEPTH) {
-        dtor_scope_markers[dtor_scope_depth++] = dtor_top;
-    }
-}
-
-static void exit_dtor_scope(IRInstr **list, int line) {
-    if (dtor_scope_depth > 0) {
-        pop_dtors_to(dtor_scope_markers[--dtor_scope_depth], list, line);
-    }
-}
-
 static void get_index_info(ASTNode *node, char **base_name, IROperand *index_op, IRInstr **list, int line) {
     ASTNode *indices[10];
     int num_indices = 0;
@@ -627,11 +574,7 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             ir_append(list, ir_make_label(L_cond, line));
             gen_cond(node->cond, list, L_body, L_end, line);
             ir_append(list, ir_make_label(L_body, line));
-            push_break_label(L_end);
-            push_continue_label(L_cond);
             gen_stmt(node->body, list);
-            pop_continue_label();
-            pop_break_label();
             ir_append(list, ir_make_goto(L_cond, line));
             ir_append(list, ir_make_label(L_end, line));
             pop_break_label();
