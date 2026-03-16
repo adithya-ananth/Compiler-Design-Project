@@ -43,4 +43,4 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR) ast.dot ir.txt output.s
+	rm -rf $(BUILD_DIR) ast.dot ir.txt ir_opt.txt output.s

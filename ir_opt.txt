@@ -1,6 +1,0 @@
-function main:
-  store s[0] (scale 4) := vtable_S
-  return 0
-
-function S_func:
-
