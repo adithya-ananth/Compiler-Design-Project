@@ -24,7 +24,7 @@ static void reset_offsets() {
 
 static int get_offset(const char *name) {
     Symbol *sym = lookup((char *)name);
-    // If it's a real variable, TRUST the Semantic Analyzer's offset layout!
+    // If it's a real variable, trust the Semantic Analyzer's offset layout
     if (sym && sym->kind != SYM_FUNCTION && sym->kind != SYM_STRUCT) {
         return sym->frame_offset; 
     }

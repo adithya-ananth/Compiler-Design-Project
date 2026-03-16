@@ -219,13 +219,13 @@ static int strength_reduction(IRInstr *instr) {
         if (instr->right.is_const && instr->right.const_val == 2) {
             instr->binop = '+';
             instr->right = instr->left;
-            /* DEEP COPY to prevent double free! */
+            /* DEEP COPY to prevent double free */
             if (instr->left.name) instr->right.name = strdup(instr->left.name); 
             return 1;
         } else if (instr->left.is_const && instr->left.const_val == 2) {
             instr->binop = '+';
             instr->left = instr->right;
-            /* DEEP COPY to prevent double free! */
+            /* DEEP COPY to prevent double free */
             if (instr->right.name) instr->left.name = strdup(instr->right.name); 
             return 1;
         }
@@ -749,7 +749,7 @@ void optimize_program(IRProgram *prog) {
 
             /* Phase 4: Loop optimizations (LICM, Unrolling) */
             optimize_loops(cfg); 
-            unroll_loops(cfg);
+            // unroll_loops(cfg);
 
             f->instrs = flatten_cfg(cfg);
             free_cfg(cfg);
