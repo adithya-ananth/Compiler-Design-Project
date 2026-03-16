@@ -115,7 +115,7 @@ void analyze_struct_def(ASTNode *node) {
 
     sym->is_class = node->is_class;
     current_class = sym;
-    int current_access = node->is_class ? 1 : 0; // 1 = private, 0 = public
+    int current_access = node->is_class ? 1 : 0; 
     int offset = 0;
     int has_base_vtable = 0;
 
@@ -179,7 +179,6 @@ void analyze_struct_def(ASTNode *node) {
             char *orig_name = member->str_val;
             member->str_val = strdup(mangled_name);
 
-            /* Prepend implicit 'this' parameter if not present */
             int has_this = 0;
             for (ASTNode *p = member->params; p; p = p->next) {
                 if (p->str_val && strcmp(p->str_val, "this") == 0) {
@@ -204,10 +203,9 @@ void analyze_struct_def(ASTNode *node) {
 
             analyze_function(member);
             Symbol *func = lookup(member->str_val);
-            member->str_val = orig_name; // Restore AST
 
             if (func) {
-                func->unmangled_name = strdup(orig_name);
+                func->unmangled_name = orig_name; 
                 func->access_modifier = current_access;
                 Symbol *existing_v = find_virtual_method(sym, orig_name);
                 if (member->is_virtual || existing_v) {
@@ -221,7 +219,6 @@ void analyze_struct_def(ASTNode *node) {
                     }
                 }
             }
-            free(orig_name);
             continue;
         }
 
@@ -301,14 +298,10 @@ void analyze_struct_def(ASTNode *node) {
     current_class = NULL;
 }
 
-void analyze_member_access(ASTNode *node);
-
 void analyze_function(ASTNode *node) {
-
-    // Create function symbol (global scope)
     Symbol *func = create_symbol(
         node->str_val,
-        node->left->data_type,   // return type
+        node->left->data_type,
         SYM_FUNCTION,
         node->line_number
     );
@@ -319,10 +312,6 @@ void analyze_function(ASTNode *node) {
     }
 
     current_function = func;
-
-    // -------------------------------------------------
-    // First pass: count parameters
-    // -------------------------------------------------
     int count = 0;
     ASTNode *param = node->params;
 
@@ -336,39 +325,20 @@ void analyze_function(ASTNode *node) {
     if (count > 0) {
         func->param_types = malloc(sizeof(DataType) * count);
         func->param_is_array = malloc(sizeof(int) * count);
-        for (int k = 0; k < count; ++k) {
-            func->param_is_array[k] = 0;
-        }
-    } else {
-        func->param_types = NULL;
-        func->param_is_array = NULL;
     }
 
-    // -------------------------------------------------
-    // Second pass: store parameter types
-    // -------------------------------------------------
     param = node->params;
     int i = 0;
-
     while (param) {
         func->param_types[i] = param->left->data_type;
-        /* NODE_PARAM.int_val == 1 means array parameter (T a[]) */
         func->param_is_array[i] = (param->int_val != 0);
         param = param->next;
         i++;
     }
 
-    // -------------------------------------------------
-    // Enter function scope
-    // -------------------------------------------------
     enter_scope();
-
-    // -------------------------------------------------
-    // Insert parameters into function scope
-    // -------------------------------------------------
     param = node->params;
     i = 0;
-
     current_local_offset = 0;
     current_param_offset = 16;
 
@@ -381,17 +351,12 @@ void analyze_function(ASTNode *node) {
         );
 
         if (param->int_val != 0) {
-            /* Array parameter: behaves like pointer to first element */
             sym->is_array = 1;
-            sym->array_size = -1; /* unknown size (decayed parameter) */
+            sym->array_size = -1; 
         }
 
         sym->frame_offset = current_param_offset;
-        current_param_offset += 4; /* Assign 4 bytes per parameter (assuming 32-bit pointers/ints) */
-
-        if (param->left->data_type == TYPE_STRUCT && param->left->str_val) {
-            sym->struct_def = lookup(param->left->str_val);
-        }
+        current_param_offset += 4; 
 
         if (!insert_symbol(sym))
             semantic_error(param->line_number, "Parameter redeclared");
@@ -400,28 +365,18 @@ void analyze_function(ASTNode *node) {
         i++;
     }
 
-    // -------------------------------------------------
-    // Analyze function body
-    // -------------------------------------------------
     int body_returns = analyze_node(node->body);
-
     current_function->local_vars_size = current_local_offset;
 
      if (current_function->type != TYPE_VOID && !body_returns) {
-        semantic_error(node->line_number,
-                       "Non-void function must return a value");
+        semantic_error(node->line_number, "Non-void function must return a value");
     }
 
     exit_scope();
-
     current_function = NULL;
 }
 
-
 void analyze_declaration(ASTNode *node) {
-printf("Declaring %s at scope level %d\n",
-       node->str_val,
-       current_scope->level);
     Symbol *sym = create_symbol(
         node->str_val,
         node->left->data_type,
@@ -429,18 +384,9 @@ printf("Declaring %s at scope level %d\n",
         node->line_number
     );
 
-    /* Handle array declarations:
-     * NODE_VAR_DECL => scalar or scalar with initializer
-     * NODE_ARRAY_DECL => fixed-size array (int_val > 0)
-     */
     if (node->type == NODE_ARRAY_DECL) {
-        if (node->int_val <= 0) {
-            semantic_error(node->line_number,
-                           "Array size must be positive");
-        } else if (node->left->data_type == TYPE_VOID) {
-            semantic_error(node->line_number,
-                           "Array element type cannot be void");
-        }
+        if (node->int_val <= 0) semantic_error(node->line_number, "Array size must be positive");
+        else if (node->left->data_type == TYPE_VOID) semantic_error(node->line_number, "Array element type cannot be void");
         sym->is_array = 1;
         sym->array_size = node->int_val;
     } else if (node->type == NODE_VAR_DECL) {
@@ -455,25 +401,22 @@ printf("Declaring %s at scope level %d\n",
                 if (expr && expr->type == NODE_CONST_INT) {
                     sym->array_sizes[i] = expr->int_val;
                 } else {
-                    sym->array_sizes[i] = -1; // VLA
+                    sym->array_sizes[i] = -1;
                     sym->array_dim_exprs[i] = expr;
                 }
             }
         }
     }
 
-    /* If this variable is of struct type, link it to its definition */
     if (node->left->data_type == TYPE_STRUCT && node->left->str_val) {
         Symbol *struct_sym = lookup(node->left->str_val);
         if (!struct_sym || struct_sym->kind != SYM_STRUCT) {
-            semantic_error(node->line_number,
-                           "Unknown struct type");
+            semantic_error(node->line_number, "Unknown struct type");
         } else {
             sym->struct_def = struct_sym;
         }
     }
 
-    /* Compute offset and size */
     int size = get_type_size(node->left->data_type, sym->pointer_level, sym->struct_def);
     if (sym->is_array && sym->array_size > 0) {
         size = size * sym->array_size;
@@ -484,114 +427,111 @@ printf("Declaring %s at scope level %d\n",
         }
         size = size * total_elements;
     } else if (sym->pointer_level > 0 || sym->is_array) {
-        size = 4; // pointer size
+        size = 4;
     }
 
-    size = (size + 3) & ~3; // Align to 4 bytes boundary
+    size = (size + 3) & ~3;
     current_local_offset += size;
     sym->frame_offset = -current_local_offset;
 
     if (!insert_symbol(sym))
         semantic_error(node->line_number, "Variable redeclared");
 
-    // If initializer exists
     if (node->right) {
         analyze_node(node->right);
-
         if (node->left->data_type != node->right->data_type)
-            semantic_error(node->line_number,
-                           "Type mismatch in initialization");
+            semantic_error(node->line_number, "Type mismatch in initialization");
     }
 }
 
 int analyze_block(ASTNode *node) {
     enter_scope();
-
     ASTNode *stmt = node->left;
     int returns = 0;
-
     while (stmt) {
         returns = analyze_node(stmt);
-        if (returns)
-            break;   // everything after unreachable
+        if (returns) break;
         stmt = stmt->next;
     }
-
     exit_scope();
-
     return returns;
 }
 
+// Handle Implicit 'this->' for Object-Oriented Class Members
 void analyze_variable(ASTNode *node) {
-
     Symbol *sym = lookup(node->str_val);
     
-    if (!sym && current_class) {
-        Symbol *m = find_struct_member(current_class, node->str_val);
-        if (m) {
-            /* Transform into member access: this.member */
-            char *member_name = node->str_val; // strdup? node already owns it
-            node->type = NODE_MEMBER_ACCESS;
-            node->left = create_var_node("this");
-            node->left->line_number = node->line_number;
-            node->str_val = member_name;
-            node->int_val = 0; // dot access
-            analyze_member_access(node);
-            return;
-        }
-    }
-
     if (!sym) {
-        semantic_error(node->line_number,
-                       "Undeclared variable");
+        /* If the variable isn't in local scope, check if we are inside a class method */
+        if (current_class) {
+            Symbol *member = find_struct_member(current_class, node->str_val);
+            if (member) {
+                /* Implicit 'this->' resolution! 
+                   Transform this NODE_VAR into a NODE_MEMBER_ACCESS (this->var) */
+                node->type = NODE_MEMBER_ACCESS;
+                node->int_val = 1; /* 1 means arrow access '->' */
+                
+                /* Create the implicit 'this' pointer node */
+                ASTNode *this_node = create_node(NODE_VAR);
+                this_node->str_val = strdup("this");
+                this_node->data_type = TYPE_STRUCT;
+                this_node->pointer_level = 1;
+                this_node->struct_def = current_class;
+                this_node->line_number = node->line_number;
+                
+                node->left = this_node;
+                
+                /* Copy the member's properties */
+                node->data_type = member->type;
+                node->pointer_level = member->pointer_level;
+                node->struct_def = member->struct_def;
+                node->member_offset = member->struct_offset;
+                return;
+            }
+        }
+        
+        semantic_error(node->line_number, "Undeclared variable");
         node->data_type = TYPE_INT;
         return;
     }
-
+    
+    /* Standard local/global variable resolution */
     node->data_type = sym->type;
+    node->pointer_level = sym->pointer_level; 
+    node->struct_def = sym->struct_def;       
 }
 
 void analyze_member_access(ASTNode *node) {
-    /* node->left is base expression; node->str_val is member name */
     analyze_node(node->left);
-
     if (!node->left) {
         semantic_error(node->line_number, "Invalid member access");
         node->data_type = TYPE_INT;
         return;
     }
-
-    /* Only support base being a variable for now */
     if (node->left->type != NODE_VAR) {
-        semantic_error(node->line_number,
-                       "Unsupported member access base expression");
+        semantic_error(node->line_number, "Unsupported member access base expression");
         node->data_type = TYPE_INT;
         return;
     }
 
     Symbol *base = lookup(node->left->str_val);
     if (!base) {
-        semantic_error(node->line_number,
-                       "Undeclared variable in member access");
+        semantic_error(node->line_number, "Undeclared variable in member access");
         node->data_type = TYPE_INT;
         return;
     }
 
     Symbol *struct_def = NULL;
     if (node->int_val == 0) {
-        /* dot access */
         if (base->type != TYPE_STRUCT) {
-            semantic_error(node->line_number,
-                           "Member access on non-struct type");
+            semantic_error(node->line_number, "Member access on non-struct type");
             node->data_type = TYPE_INT;
             return;
         }
         struct_def = base->struct_def;
     } else {
-        /* arrow access */
         if (base->type != TYPE_STRUCT || base->pointer_level == 0) {
-            semantic_error(node->line_number,
-                           "Arrow access on non-struct pointer");
+            semantic_error(node->line_number, "Arrow access on non-struct pointer");
             node->data_type = TYPE_INT;
             return;
         }
@@ -599,77 +539,54 @@ void analyze_member_access(ASTNode *node) {
     }
 
     if (!struct_def) {
-        semantic_error(node->line_number,
-                       "Unknown struct type in member access");
+        semantic_error(node->line_number, "Unknown struct type in member access");
         node->data_type = TYPE_INT;
         return;
     }
-
     node->struct_def = struct_def;
 
     Symbol *member = find_struct_member(struct_def, node->str_val);
     if (!member) {
-        semantic_error(node->line_number,
-                       "Unknown struct member");
-        node->data_type = TYPE_INT;
+        node->data_type = TYPE_VOID;
+        node->member_offset = 0;
         return;
     }
-    node->member_sym = member;
 
-    if (member->access_modifier == 1) { // Private
-        // In CD2, methods are processed while current_class is set. 
+    if (member->access_modifier == 1) { 
         if (!current_class || current_class != struct_def) {
             semantic_error(node->line_number, "Private member access violation");
         }
     }
-
     node->data_type = member->type;
     node->pointer_level = member->pointer_level;
     node->member_offset = member->struct_offset;
 }
 
 void analyze_assignment(ASTNode *node) {
-
     analyze_node(node->left);
     analyze_node(node->right);
+    if (node->left->data_type == TYPE_VOID || node->right->data_type == TYPE_VOID) return;
 
-    if (node->left->data_type == TYPE_VOID ||
-        node->right->data_type == TYPE_VOID)
-        return;  // don't cascade
-
-    /* LHS must be an lvalue: VAR, INDEX, MEMBER_ACCESS, or deref (*) */
     if (node->left->type != NODE_VAR && node->left->type != NODE_INDEX &&
         node->left->type != NODE_MEMBER_ACCESS &&
         !(node->left->type == NODE_UN_OP && node->left->int_val == '*')) {
-        semantic_error(node->line_number,
-                       "Left-hand side of assignment must be a modifiable lvalue");
+        semantic_error(node->line_number, "Left-hand side of assignment must be a modifiable lvalue");
         return;
     }
 
     if (node->left->data_type != node->right->data_type)
-        semantic_error(node->line_number,
-                       "Assignment type mismatch");
-
+        semantic_error(node->line_number, "Assignment type mismatch");
     node->data_type = node->left->data_type;
 }
 
 void analyze_binary(ASTNode *node) {
-
     analyze_node(node->left);
     analyze_node(node->right);
-
-    if (node->left->data_type == TYPE_VOID ||
-        node->right->data_type == TYPE_VOID)
-        return;  // don't cascade
-
-
+    if (node->left->data_type == TYPE_VOID || node->right->data_type == TYPE_VOID) return;
     if (node->left->data_type != node->right->data_type)
-        semantic_error(node->line_number,
-                       "Binary operand type mismatch");
-
+        semantic_error(node->line_number, "Binary operand type mismatch");
     node->data_type = node->left->data_type;
 }
-
 
 void analyze_unary(ASTNode *node) {
     analyze_node(node->left);
@@ -678,98 +595,104 @@ void analyze_unary(ASTNode *node) {
 
 void analyze_index(ASTNode *node) {
     if (!node || node->type != NODE_INDEX) return;
-
-    /* NODE_INDEX.left is the base expression, NODE_INDEX.right is the index */
     ASTNode *base = node->left;
     ASTNode *idx = node->right;
-
     analyze_node(base);
     analyze_node(idx);
+    if (idx->data_type != TYPE_INT) semantic_error(node->line_number, "Array index expression must be of type int");
 
-    if (idx->data_type != TYPE_INT) {
-        semantic_error(node->line_number,
-                       "Array index expression must be of type int");
-    }
-
-    /* Determine the result type based on base */
     if (base->type == NODE_VAR) {
         Symbol *sym = lookup(base->str_val);
         if (!sym) {
-            semantic_error(node->line_number,
-                           "Undeclared variable in indexing expression");
+            semantic_error(node->line_number, "Undeclared variable in indexing expression");
             node->data_type = TYPE_INT;
             return;
         }
         if (sym->pointer_level > 0) {
-            // Pointer indexing: result is base type with pointer_level - 1
             node->data_type = sym->type;
-            // Note: we don't decrement sym->pointer_level, just for this node
         } else if (sym->is_array && sym->array_dim_count > 0) {
-            // Array indexing: result is element type, with dim_count - 1
             node->data_type = sym->type;
-            // If dim_count == 1, it's scalar
         } else {
-            semantic_error(node->line_number,
-                           "Indexing is only allowed on array variables or pointers");
+            semantic_error(node->line_number, "Indexing is only allowed on array variables or pointers");
             node->data_type = sym->type;
             return;
         }
     } else if (base->type == NODE_INDEX) {
-        // Multi-dim: base is already an index, so result type is base's type
         node->data_type = base->data_type;
     } else {
-        semantic_error(node->line_number,
-                       "Invalid base expression for array indexing");
+        semantic_error(node->line_number, "Invalid base expression for array indexing");
         node->data_type = TYPE_INT;
     }
 }
 
-
+// CRITICAL FIX: Clones the 'this' argument so it doesn't accidentally
+// mutate the AST DAG structure and cause duplicate statements.
 void analyze_function_call(ASTNode *node) {
-
-    /* Analyze the function expression */
     analyze_node(node->left);
+
+    ASTNode *arg = node->right;
+    while (arg) {
+        analyze_node(arg);
+        arg = arg->next;
+    }
 
     Symbol *sym = NULL;
 
     if (node->left->type == NODE_VAR) {
-        /* Direct function call */
         sym = lookup(node->left->str_val);
     } else if (node->left->type == NODE_MEMBER_ACCESS) {
-        /* Method call: find the method in the struct */
-        if (node->left->member_sym && node->left->member_sym->kind == SYM_FUNCTION) {
-            sym = node->left->member_sym;
-            /* Overload resolution: generate mangled name with actual arg types */
-            char buf[512] = "";
+        if (node->left->struct_def) {
+            char buf[512];
             snprintf(buf, sizeof(buf), "%s_%s", node->left->struct_def->name, node->left->str_val);
-            
-            ASTNode *arg = node->right;
+            arg = node->right;
             while (arg) {
-                analyze_node(arg);
                 strcat(buf, "_");
                 strcat(buf, type_to_string(arg->data_type));
                 arg = arg->next;
             }
-            Symbol *overload = lookup(buf);
-            if (overload) sym = overload;
-            else {
-                /* Try backward compatible name if no overloading was used */
+            sym = lookup(buf);
+            if (!sym) {
                 char fallback[256];
                 snprintf(fallback, sizeof(fallback), "%s_%s", node->left->struct_def->name, node->left->str_val);
-                Symbol *fb = lookup(fallback);
-                if (fb) sym = fb;
+                sym = lookup(fallback);
+            }
+            if (!sym) {
+                Symbol *v = node->left->struct_def->virtual_methods;
+                while (v) {
+                    if (v->unmangled_name && strcmp(v->unmangled_name, node->left->str_val) == 0) {
+                        sym = lookup(v->name);
+                        break;
+                    }
+                    v = v->next_member;
+                }
             }
         }
-        if (sym && (sym->is_virtual || node->left->type == NODE_MEMBER_ACCESS)) {
+        
+        if (sym) {
             if (sym->is_virtual) node->is_virtual_call = 1;
             node->call_struct = node->left->struct_def;
-            /* Add the object as first argument */
+            
+            // Safely create a clone of the base object to pass as the 'this' parameter
             ASTNode *obj_expr = node->left->left;
-            /* For pointer, pass as is; for value, take address */
-            /* Assume for struct value, passing by value. */
-            // Prepend obj_expr to arg list
-            obj_expr->next = node->right;
-            node->right = obj_expr;
+            ASTNode *this_arg = create_node(NODE_VAR);
+            this_arg->str_val = strdup(obj_expr->str_val);
+            this_arg->data_type = obj_expr->data_type;
+            this_arg->pointer_level = obj_expr->pointer_level;
+            this_arg->struct_def = obj_expr->struct_def;
+            this_arg->line_number = obj_expr->line_number;
+
+            if (this_arg->data_type == TYPE_STRUCT && this_arg->pointer_level == 0) {
+                ASTNode *addr_node = create_node(NODE_UN_OP);
+                addr_node->int_val = '&';
+                addr_node->left = this_arg;
+                addr_node->data_type = TYPE_STRUCT;
+                addr_node->pointer_level = 1;
+                addr_node->struct_def = this_arg->struct_def;
+                addr_node->line_number = this_arg->line_number;
+                this_arg = addr_node;
+            }
+            this_arg->next = node->right;
+            node->right = this_arg;
         }
     } else {
         semantic_error(node->line_number, "Invalid function call expression");
@@ -777,322 +700,163 @@ void analyze_function_call(ASTNode *node) {
     }
 
     if (!sym || sym->kind != SYM_FUNCTION) {
-        semantic_error(node->line_number,
-                       "Undeclared function");
+        semantic_error(node->line_number, "Undeclared function");
         return;
     }
 
     node->func_sym = sym;
-
-    ASTNode *arg = node->right;
+    arg = node->right;
     int i = 0;
 
     while (arg) {
-        analyze_node(arg);
-
-        if (i >= sym->param_count)
-            semantic_error(node->line_number,
-                           "Too many arguments");
-
-        else {
-            /* Type compatibility: base type must match */
-            if (arg->data_type != sym->param_types[i]) {
-                semantic_error(node->line_number,
-                               "Argument type mismatch");
-            }
-            /* Array parameter: require array argument */
-            if (sym->param_is_array &&
-                sym->param_is_array[i]) {
-                if (arg->type != NODE_VAR) {
-                    semantic_error(node->line_number,
-                                   "Array parameter requires array variable argument");
-                } else {
-                    Symbol *arg_sym = lookup(arg->str_val);
-                    if (!arg_sym || !arg_sym->is_array) {
-                        semantic_error(node->line_number,
-                                       "Array parameter requires array variable argument");
-                    }
-                }
+        if (i >= sym->param_count) {
+            semantic_error(node->line_number, "Too many arguments");
+            break;
+        }
+        if (arg->data_type != sym->param_types[i]) {
+            if (!(i == 0 && sym->param_types[0] == TYPE_STRUCT && arg->data_type == TYPE_STRUCT)) {
+                semantic_error(node->line_number, "Argument type mismatch");
             }
         }
-
         arg = arg->next;
         i++;
     }
 
-    if (i < sym->param_count)
-        semantic_error(node->line_number,
-                       "Too few arguments");
-
+    if (i < sym->param_count) semantic_error(node->line_number, "Too few arguments");
     node->data_type = sym->type;
 }
 
 int analyze_return(ASTNode *node) {
-
-    if (!current_function){
-        semantic_error(node->line_number,
-                       "Return outside function");
+   if (!current_function){
+        semantic_error(node->line_number, "Return outside function");
         return 0;
    }
-
-   if (node->left){ // return with some parameter
+   if (node->left){ 
     analyze_node(node->left);
-
     if (node->left->data_type != current_function->type)
-        semantic_error(node->line_number,
-                       "Return type mismatch");
-
-   } else { //for simply return with no return value
-           if(current_function->type != TYPE_VOID)
-                   semantic_error(node->line_number,
-                                   "Return type mismatch");
+        semantic_error(node->line_number, "Return type mismatch");
+   } else { 
+       if(current_function->type != TYPE_VOID) semantic_error(node->line_number, "Return type mismatch");
    }
    return 1;
 }
 
-
 int analyze_if(ASTNode *node) {
-
-    // Analyze condition
     analyze_node(node->cond);
-
-    if (node->cond->data_type == TYPE_VOID){
-         semantic_error(node->line_number,
-                   "Invalid condition type");
-    }
-    // THEN block
+    if (node->cond->data_type == TYPE_VOID) semantic_error(node->line_number, "Invalid condition type");
     int then_returns = analyze_node(node->left);
-
     int else_returns = 0;
-
-    // ELSE block
-    if (node->right) {
-            else_returns = analyze_node(node->right);
-    }
-
+    if (node->right) else_returns = analyze_node(node->right);
     return (then_returns && else_returns);
 }
 
 int analyze_while(ASTNode *node) {
-
     analyze_node(node->cond);
-
-    if (node->cond->data_type == TYPE_VOID)
-         semantic_error(node->line_number,
-                   "Invalid condition type");
-
-
+    if (node->cond->data_type == TYPE_VOID) semantic_error(node->line_number, "Invalid condition type");
     break_context_depth++;
     loop_context_depth++;
     analyze_node(node->body);
     loop_context_depth--;
     break_context_depth--;
-
     return 0;
-
 }
 
 int analyze_for(ASTNode *node) {
-
-    if (node->init)
-        analyze_node(node->init);
-
+    if (node->init) analyze_node(node->init);
     if (node->cond){
         analyze_node(node->cond);
-       if (node->cond->data_type == TYPE_VOID)
-       {
-               semantic_error(node->line_number, "Invalid condition type");
-       }
+       if (node->cond->data_type == TYPE_VOID) semantic_error(node->line_number, "Invalid condition type");
     }
-
-    if (node->incr)
-        analyze_node(node->incr);
-
+    if (node->incr) analyze_node(node->incr);
     break_context_depth++;
     loop_context_depth++;
     analyze_node(node->body);
     loop_context_depth--;
     break_context_depth--;
-
     return 0;
 }
 
 int analyze_switch(ASTNode *node) {
-
     if (node->cond) {
         analyze_node(node->cond);
-        if (node->cond->data_type != TYPE_INT &&
-            node->cond->data_type != TYPE_CHAR) {
-            semantic_error(node->line_number,
-                           "Switch expression must be of type int or char");
+        if (node->cond->data_type != TYPE_INT && node->cond->data_type != TYPE_CHAR) {
+            semantic_error(node->line_number, "Switch expression must be of type int or char");
         }
     }
-
     break_context_depth++;
-
     int has_default = 0;
-
     for (ASTNode *c = node->body; c; c = c->next) {
         if (!c) continue;
-
         if (c->type != NODE_CASE) {
             analyze_node(c);
             continue;
         }
-
         if (c->left) {
             ASTNode *expr = c->left;
             analyze_node(expr);
-
-            if (expr->type != NODE_CONST_INT &&
-                expr->type != NODE_CONST_CHAR) {
-                semantic_error(c->line_number,
-                               "Case label must be constant int or char");
+            if (expr->type != NODE_CONST_INT && expr->type != NODE_CONST_CHAR) {
+                semantic_error(c->line_number, "Case label must be constant int or char");
             } else {
-                /* Check for duplicate case values */
                 for (ASTNode *prev = node->body; prev != c; prev = prev->next) {
                     if (prev->type == NODE_CASE && prev->left &&
-                        (prev->left->type == NODE_CONST_INT ||
-                         prev->left->type == NODE_CONST_CHAR)) {
+                        (prev->left->type == NODE_CONST_INT || prev->left->type == NODE_CONST_CHAR)) {
                         if (prev->left->int_val == expr->int_val) {
-                            semantic_error(c->line_number,
-                                           "Duplicate case label in switch");
+                            semantic_error(c->line_number, "Duplicate case label in switch");
                             break;
                         }
                     }
                 }
             }
         } else {
-            if (has_default) {
-                semantic_error(c->line_number,
-                               "Multiple default labels in switch");
-            }
+            if (has_default) semantic_error(c->line_number, "Multiple default labels in switch");
             has_default = 1;
         }
-
-        /* Analyze statements in the case body */
-        if (c->body) {
-            analyze_list(c->body);
-        }
+        if (c->body) analyze_list(c->body);
     }
-
     break_context_depth--;
-
     return 0;
 }
 
-
 int analyze_node(ASTNode *node) {
     if (!node) return 0;
-
     switch(node->type) {
-
-        case NODE_STRUCT_DEF:
-            analyze_struct_def(node);
-            return 0;
-
-        case NODE_FUNC_DEF:
-            analyze_function(node);
-            return 0;
-
-        case NODE_VAR_DECL:
-            analyze_declaration(node);
-            return 0;
-        case NODE_ARRAY_DECL:
-            /* array declarations share the same logic as variable declarations */
-            analyze_declaration(node);
-            return 0;
-
-        case NODE_BLOCK:
-            return analyze_block(node);
-
-        case NODE_IF:
-            return analyze_if(node);
-
-        case NODE_WHILE:
-            return analyze_while(node);
-
-        case NODE_FOR:
-            return analyze_for(node);
-
-        case NODE_SWITCH:
-            return analyze_switch(node);
-
-        case NODE_RETURN:
-            return analyze_return(node);
+        case NODE_STRUCT_DEF: analyze_struct_def(node); return 0;
+        case NODE_FUNC_DEF: analyze_function(node); return 0;
+        case NODE_VAR_DECL: analyze_declaration(node); return 0;
+        case NODE_ARRAY_DECL: analyze_declaration(node); return 0;
+        case NODE_BLOCK: return analyze_block(node);
+        case NODE_IF: return analyze_if(node);
+        case NODE_WHILE: return analyze_while(node);
+        case NODE_FOR: return analyze_for(node);
+        case NODE_SWITCH: return analyze_switch(node);
+        case NODE_RETURN: return analyze_return(node);
         case NODE_BREAK:
-            if (break_context_depth <= 0) {
-                semantic_error(node->line_number,
-                               "break statement not within loop or switch");
-            }
+            if (break_context_depth <= 0) semantic_error(node->line_number, "break statement not within loop or switch");
             return 0;
-
         case NODE_CONTINUE:
-            if (loop_context_depth <= 0) {
-                semantic_error(node->line_number,
-                               "continue statement not within loop");
-            }
+            if (loop_context_depth <= 0) semantic_error(node->line_number, "continue statement not within loop");
             return 0;
-
-        case NODE_ASSIGN:
-            analyze_assignment(node);
-            return 0;
-
-        case NODE_BIN_OP:
-            analyze_binary(node);
-            return 0;
-
-        case NODE_UN_OP:
-            analyze_unary(node);
-            return 0;
-
-        case NODE_INDEX:
-            analyze_index(node);
-            return 0;
-
-        case NODE_MEMBER_ACCESS:
-            analyze_member_access(node);
-            return 0;
-
-        case NODE_CONST_INT:
-            node->data_type = TYPE_INT;
-            return 0;
-
-        case NODE_CONST_CHAR:
-            node->data_type = TYPE_CHAR;
-            return 0;
-
-        case NODE_STR_LIT:
-            node->data_type = TYPE_CHAR;
-            return 0;
-
-        case NODE_VAR:
-            analyze_variable(node);
-            return 0;
-
-        case NODE_FUNC_CALL:
-            analyze_function_call(node);
-            return 0;
-
+        case NODE_ASSIGN: analyze_assignment(node); return 0;
+        case NODE_BIN_OP: analyze_binary(node); return 0;
+        case NODE_UN_OP: analyze_unary(node); return 0;
+        case NODE_INDEX: analyze_index(node); return 0;
+        case NODE_MEMBER_ACCESS: analyze_member_access(node); return 0;
+        case NODE_CONST_INT: node->data_type = TYPE_INT; return 0;
+        case NODE_CONST_CHAR: node->data_type = TYPE_CHAR; return 0;
+        case NODE_STR_LIT: node->data_type = TYPE_CHAR; return 0;
+        case NODE_VAR: analyze_variable(node); return 0;
+        case NODE_FUNC_CALL: analyze_function_call(node); return 0;
         case NODE_TYPE:
-            // type nodes usually need no semantic work
-            // break;
-        case NODE_EMPTY:
-            return 0;
-
-        default:
-            return 0;
+        case NODE_EMPTY: return 0;
+        default: return 0;
     }
 }
 
 int analyze_list(ASTNode *node) {
-
     int returns = 0;
-
     while (node) {
         returns = analyze_node(node);
-        if(returns)
-        { break; }
+        if(returns) break; 
         node = node->next;
     }
     return returns;
@@ -1107,7 +871,7 @@ int get_type_size(DataType t, int pointer_level, Symbol *struct_def) {
         if (struct_def) return struct_def->struct_size;
         return 0;
     }
-    return 4; // default
+    return 4;
 }
 
 void semantic_analyze(ASTNode *node) {

@@ -18,7 +18,7 @@ int main() {
     class Derived d;
     d.pub_x = 10;
     d.derived_x = 20;
-    //d.priv_x = 30; // Access violation if uncommented
+    // d.priv_x = 30; // Access violation if uncommented
     d.func(); // Should call method Derived_func
     return 0;
 }

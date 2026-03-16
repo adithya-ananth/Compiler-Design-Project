@@ -84,9 +84,12 @@ static void push_dtor(const char *var, const char *dtor) {
 static void pop_dtors_to(int target_top, IRInstr **list, int line) {
     for (int i = dtor_top - 1; i >= target_top; i--) {
         IROperand self = ir_op_name(dtor_stack[i].var_name);
-        ir_append(list, ir_make_param(self, line));
+        char *t = ir_new_temp();
+        ir_append(list, ir_make_unop(t, self, '&', line)); // <--- ADDED: take address '&'
+        ir_append(list, ir_make_param(ir_op_name(t), line)); // <--- Pass the address temp
         ir_append(list, ir_make_call_void(dtor_stack[i].dtor_name, 1, line));
         if (self.name) free(self.name);
+        free(t);
         free(dtor_stack[i].var_name);
         free(dtor_stack[i].dtor_name);
     }
@@ -96,9 +99,12 @@ static void pop_dtors_to(int target_top, IRInstr **list, int line) {
 static void emit_dtors_up_to(int target_top, IRInstr **list, int line) {
     for (int i = dtor_top - 1; i >= target_top; i--) {
         IROperand self = ir_op_name(dtor_stack[i].var_name);
-        ir_append(list, ir_make_param(self, line));
+        char *t = ir_new_temp();
+        ir_append(list, ir_make_unop(t, self, '&', line)); // <--- ADDED: take address '&'
+        ir_append(list, ir_make_param(ir_op_name(t), line)); // <--- Pass the address temp
         ir_append(list, ir_make_call_void(dtor_stack[i].dtor_name, 1, line));
         if (self.name) free(self.name);
+        free(t);
     }
 }
 
@@ -444,48 +450,41 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
         case NODE_FUNC_CALL: {
             int nargs = 0;
             ASTNode *arg = node->right;
-            char *obj_name = NULL;
             IROperand func_ptr_op;
             int is_virtual = node->is_virtual_call;
             int is_method = (node->left->type == NODE_MEMBER_ACCESS);
+            
+            IROperand obj_op = {0};
 
-            if (is_method) {
-                /* For virtual/method calls, the first arg is the object pointer. */
-                if (arg && arg->type == NODE_VAR) {
-                    obj_name = strdup(arg->str_val);
-                }
+            if (is_method && arg) {
+                /* Evaluate 'this' pointer */
+                obj_op = gen_expr(arg, list);
+                ir_append(list, ir_make_param(obj_op, line));
+                nargs++;
+                arg = arg->next;
             }
 
             if (is_virtual) {
-                /* Virtual call: load func pointer from vtable first */
-                IROperand obj = ir_op_name(obj_name ? obj_name : "obj");
                 char *vtable_temp = ir_new_temp();
-                ir_append(list, ir_make_load(vtable_temp, obj, ir_op_const(0), 4, line));
+                ir_append(list, ir_make_load(vtable_temp, obj_op, ir_op_const(0), 4, line));
                 
                 int idx = node->func_sym ? node->func_sym->vtable_index : 0;
                 char *func_temp = ir_new_temp();
                 ir_append(list, ir_make_load(func_temp, ir_op_name(vtable_temp), ir_op_const(idx), 4, line));
                 
                 func_ptr_op = ir_op_name(func_temp);
-                
                 free(vtable_temp);
                 free(func_temp);
-                if (obj.name) free(obj.name);
             } else if (is_method) {
-                /* Non-virtual method call */
                 char *fn = node->func_sym ? node->func_sym->name : node->left->str_val;
                 func_ptr_op = ir_op_name(fn);
             } else if (node->left->type == NODE_VAR) {
-                /* Direct function call */
                 func_ptr_op = ir_op_name(node->left->str_val);
             } else {
-                /* Unsupported */
-                if (obj_name) free(obj_name);
                 return ir_op_const(0);
             }
 
-            /* Now emit params */
-            arg = node->right;
+            /* Emit remaining params */
             while (arg) {
                 IROperand a = gen_expr(arg, list);
                 ir_append(list, ir_make_param(a, line));
@@ -494,9 +493,10 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
                 arg = arg->next;
             }
 
-            /* Finally call */
+            /* Call */
             int is_void = (node->data_type == TYPE_VOID);
             IROperand res_op = ir_op_const(0);
+            
             if (is_virtual) {
                 if (is_void) {
                     ir_append(list, (IRInstr*)ir_make_call_indirect(NULL, func_ptr_op, nargs, line));
@@ -517,7 +517,7 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
                 }
             }
 
-            if (obj_name) free(obj_name);
+            if (obj_op.name) free(obj_op.name);
             ir_free_operand(&func_ptr_op);
             return res_op;
         }
@@ -747,9 +747,12 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
                 Symbol *ctor = lookup(ctor_name);
                 if (ctor) {
                     IROperand self = ir_op_name(node->str_val);
-                    ir_append(list, ir_make_param(self, line));
+                    char *t = ir_new_temp();
+                    ir_append(list, ir_make_unop(t, self, '&', line)); 
+                    ir_append(list, ir_make_param(ir_op_name(t), line)); 
                     ir_append(list, ir_make_call_void(ctor_name, 1, line));
                     if (self.name) free(self.name);
+                    free(t);
                 }
             }
             if (node->right) {
