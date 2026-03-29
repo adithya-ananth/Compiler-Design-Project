@@ -165,7 +165,169 @@ IRInstr* flatten_cfg(CFG *cfg) {
     return head;
 }
 
+/* --- Control Flow Helpers --- */
+
+static IRRelop negate_relop(IRRelop relop) {
+    switch (relop) {
+        case IR_LT: return IR_GE;
+        case IR_GT: return IR_LE;
+        case IR_LE: return IR_GT;
+        case IR_GE: return IR_LT;
+        case IR_EQ: return IR_NE;
+        case IR_NE: return IR_EQ;
+        default: return relop;
+    }
+}
+
+static void free_instr_single(IRInstr *instr) {
+    if (!instr) return;
+    if (instr->result) free(instr->result);
+    if (instr->src.name) free(instr->src.name);
+    if (instr->left.name) free(instr->left.name);
+    if (instr->right.name) free(instr->right.name);
+    if (instr->unop_src.name) free(instr->unop_src.name);
+    if (instr->base.name) free(instr->base.name);
+    if (instr->index.name) free(instr->index.name);
+    if (instr->store_val.name) free(instr->store_val.name);
+    if (instr->if_left.name) free(instr->if_left.name);
+    if (instr->if_right.name) free(instr->if_right.name);
+    if (instr->call_fn) free(instr->call_fn);
+    if (instr->label) free(instr->label);
+    free(instr);
+}
+
+static int eval_relop(int l, int r, IRRelop op) {
+    switch (op) {
+        case IR_LT: return l < r;
+        case IR_GT: return l > r;
+        case IR_LE: return l <= r;
+        case IR_GE: return l >= r;
+        case IR_EQ: return l == r;
+        case IR_NE: return l != r;
+        default: return 0;
+    }
+}
+
+static IRInstr* simplify_control_flow(IRInstr *head) {
+    if (!head) return NULL;
+    int changed = 1;
+    int iterations = 0;
+    while (changed && iterations < 20) {
+        changed = 0;
+        iterations++;
+        IRInstr **curr_ptr = &head;
+        while (*curr_ptr) {
+            IRInstr *curr = *curr_ptr;
+            /* Pattern 0: Fold IF with constant operands */
+            if (curr->kind == IR_IF && curr->if_left.is_const && curr->if_right.is_const) {
+                if (eval_relop(curr->if_left.const_val, curr->if_right.const_val, curr->relop)) {
+                    char *lbl = strdup(curr->label);
+                    free(curr->label);
+                    if (curr->if_left.name) free(curr->if_left.name);
+                    if (curr->if_right.name) free(curr->if_right.name);
+                    curr->kind = IR_GOTO;
+                    curr->label = lbl;
+                } else {
+                    *curr_ptr = curr->next;
+                    curr->next = NULL; 
+                    free_instr_single(curr);
+                    changed = 1;
+                    continue;
+                }
+                changed = 1;
+            }
+
+            /* Pattern 0.5: Unreachable code elimination */
+            if (curr->kind == IR_GOTO || curr->kind == IR_RETURN) {
+                while (curr->next && curr->next->kind != IR_LABEL) {
+                    IRInstr *to_del = curr->next;
+                    curr->next = to_del->next;
+                    to_del->next = NULL;
+                    free_instr_single(to_del);
+                    changed = 1;
+                }
+            }
+
+            /* Pattern 1: if x relop y goto L1; goto L2; L1: -> if x !relop y goto L2; L1: */
+            if (curr->kind == IR_IF && curr->next && curr->next->kind == IR_GOTO &&
+                curr->next->next && curr->next->next->kind == IR_LABEL &&
+                strcmp(curr->label, curr->next->next->label) == 0) {
+
+                char *target_L2 = strdup(curr->next->label);
+                IRRelop neg_rel = negate_relop(curr->relop);
+
+                IRInstr *goto_instr = curr->next;
+                IRInstr *label_L1 = goto_instr->next;
+
+                free(curr->label);
+                curr->label = target_L2;
+                curr->relop = neg_rel;
+                curr->next = label_L1;
+
+                goto_instr->next = NULL;
+                free_instr_single(goto_instr);
+
+                changed = 1;
+                continue;
+            }
+
+            /* Pattern 2: goto L1; L1: -> remove goto L1 */
+            if (curr->kind == IR_GOTO && curr->next && curr->next->kind == IR_LABEL &&
+                strcmp(curr->label, curr->next->label) == 0) {
+
+                *curr_ptr = curr->next;
+                curr->next = NULL;
+                free_instr_single(curr);
+                changed = 1;
+                continue;
+            }
+
+            /* Pattern 3: Jump Threading */
+            if (curr->kind == IR_GOTO || curr->kind == IR_IF) {
+                IRInstr *target = head;
+                while (target) {
+                    if (target->kind == IR_LABEL && strcmp(target->label, curr->label) == 0) {
+                        if (target->next && target->next->kind == IR_GOTO) {
+                            if (strcmp(curr->label, target->next->label) != 0) {
+                                char *old_label = curr->label;
+                                curr->label = strdup(target->next->label);
+                                free(old_label);
+                                changed = 1;
+                            }
+                        }
+                        break;
+                    }
+                    target = target->next;
+                }
+            }
+
+            curr_ptr = &((*curr_ptr)->next);
+        }
+    }
+    return head;
+}
+
+
 /* --- Local Optimizations (BB Scope) --- */
+
+static int fold_unop(IRInstr *instr) {
+    if (instr->kind != IR_UNOP) return 0;
+    if (instr->unop_src.is_const) {
+        int val = 0;
+        int valid = 1;
+        switch (instr->unop) {
+            case '-': val = -instr->unop_src.const_val; break;
+            case '!': val = !instr->unop_src.const_val; break;
+            default: valid = 0; break;
+        }
+        if (valid) {
+            instr->kind = IR_ASSIGN;
+            instr->src = ir_op_const(val);
+            return 1;
+        }
+    }
+    return 0;
+}
 
 static int fold_constants(IRInstr *instr) {
     if (instr->kind != IR_BINOP) return 0;
@@ -184,6 +346,14 @@ static int fold_constants(IRInstr *instr) {
                 if (instr->right.const_val != 0) val = instr->left.const_val % instr->right.const_val;
                 else valid = 0;
                 break;
+            case '<': val = instr->left.const_val < instr->right.const_val; break;
+            case '>': val = instr->left.const_val > instr->right.const_val; break;
+            case T_LE: val = instr->left.const_val <= instr->right.const_val; break;
+            case T_GE: val = instr->left.const_val >= instr->right.const_val; break;
+            case T_EQ: val = instr->left.const_val == instr->right.const_val; break;
+            case T_NEQ: val = instr->left.const_val != instr->right.const_val; break;
+            case T_AND: val = instr->left.const_val && instr->right.const_val; break;
+            case T_OR: val = instr->left.const_val || instr->right.const_val; break;
             default: valid = 0; break;
         }
         if (valid) {
@@ -201,13 +371,25 @@ static int peephole_algebraic(IRInstr *instr) {
             if (instr->right.is_const && instr->right.const_val == 0) { instr->kind = IR_ASSIGN; instr->src = instr->left; return 1; }
             if (instr->left.is_const && instr->left.const_val == 0) { instr->kind = IR_ASSIGN; instr->src = instr->right; return 1; }
         }
+        if (instr->binop == '-') {
+             if (instr->right.is_const && instr->right.const_val == 0) { instr->kind = IR_ASSIGN; instr->src = instr->left; return 1; }
+            if (!instr->left.is_const && !instr->right.is_const && instr->left.name && instr->right.name &&
+                strcmp(instr->left.name, instr->right.name) == 0) {
+                instr->kind = IR_ASSIGN; instr->src = ir_op_const(0); return 1;
+            }
+        }
         if (instr->binop == '*') {
             if (instr->right.is_const && instr->right.const_val == 1) { instr->kind = IR_ASSIGN; instr->src = instr->left; return 1; }
             if (instr->left.is_const && instr->left.const_val == 1) { instr->kind = IR_ASSIGN; instr->src = instr->right; return 1; }
             if ((instr->right.is_const && instr->right.const_val == 0) || (instr->left.is_const && instr->left.const_val == 0)) {
-                instr->kind = IR_ASSIGN;
-                instr->src = ir_op_const(0);
-                return 1;
+                instr->kind = IR_ASSIGN; instr->src = ir_op_const(0); return 1;
+            }
+        }
+        if (instr->binop == '/') {
+            if (instr->right.is_const && instr->right.const_val == 1) { instr->kind = IR_ASSIGN; instr->src = instr->left; return 1; }
+            if (!instr->left.is_const && !instr->right.is_const && instr->left.name && instr->right.name &&
+                strcmp(instr->left.name, instr->right.name) == 0) {
+                instr->kind = IR_ASSIGN; instr->src = ir_op_const(1); return 1;
             }
         }
     }
@@ -359,6 +541,82 @@ static int eliminate_cse(IRInstr *instr, ExprNode **exprs) {
     return 0;
 }
 
+typedef struct StoreRecord { 
+    char *base; 
+    char *index; 
+    struct StoreRecord *next; 
+} StoreRecord;
+
+static void eliminate_dead_stores_local(BasicBlock *bb) {
+    int count = 0;
+    IRInstr *cur = bb->instrs;
+    while (cur) { count++; if (cur == bb->last) break; cur = cur->next; }
+    if (count == 0) return;
+
+    IRInstr **arr = malloc(sizeof(IRInstr*) * count);
+    cur = bb->instrs;
+    for (int i = 0; i < count; i++) { arr[i] = cur; cur = cur->next; }
+
+    StoreRecord *stores = NULL;
+
+    for (int i = count - 1; i >= 0; i--) {
+        IRInstr *instr = arr[i];
+
+        if (instr->kind == IR_STORE) {
+            int is_dead = 0;
+            StoreRecord *s = stores;
+            while (s) {
+                if (strcmp(s->base, instr->base.name) == 0 &&
+                    ((instr->index.is_const && s->index == NULL) || 
+                     (!instr->index.is_const && s->index && strcmp(s->index, instr->index.name) == 0))) {
+                    is_dead = 1; break;
+                }
+                s = s->next;
+            }
+
+            if (is_dead) {
+                // Delete the dead store
+                if (i == 0) bb->instrs = instr->next;
+                else arr[i-1]->next = instr->next;
+                if (instr == bb->last) bb->last = (i > 0) ? arr[i-1] : NULL;
+                continue;
+            } else {
+                // Track this store
+                StoreRecord *ns = malloc(sizeof(StoreRecord));
+                ns->base = strdup(instr->base.name);
+                ns->index = instr->index.is_const ? NULL : strdup(instr->index.name);
+                ns->next = stores;
+                stores = ns;
+            }
+        } else if (instr->kind == IR_LOAD) {
+            // A load means previous stores to this base are no longer dead
+            StoreRecord **s = &stores;
+            while (*s) {
+                if (strcmp((*s)->base, instr->base.name) == 0) {
+                    StoreRecord *tmp = *s;
+                    *s = (*s)->next;
+                    free(tmp->base); if (tmp->index) free(tmp->index); free(tmp);
+                } else {
+                    s = &((*s)->next);
+                }
+            }
+        } else if (instr->kind == IR_CALL || instr->kind == IR_CALL_INDIRECT) {
+            // Function calls might read memory, clear the tracking list
+            while (stores) {
+                StoreRecord *tmp = stores;
+                stores = stores->next;
+                free(tmp->base); if (tmp->index) free(tmp->index); free(tmp);
+            }
+        }
+    }
+    free(arr);
+    while (stores) {
+        StoreRecord *tmp = stores;
+        stores = stores->next;
+        free(tmp->base); if (tmp->index) free(tmp->index); free(tmp);
+    }
+}
+
 static void optimize_bb(BasicBlock *bb) {
     int changed = 1;
     while (changed) {
@@ -369,6 +627,7 @@ static void optimize_bb(BasicBlock *bb) {
             changed |= propagate_constants_and_copies(curr, &consts, &copies);
             changed |= eliminate_cse(curr, &exprs);
             changed |= fold_constants(curr);
+            changed |= fold_unop(curr);
             changed |= strength_reduction(curr);
             changed |= peephole_algebraic(curr);
             if (curr == bb->last) break;
@@ -376,6 +635,8 @@ static void optimize_bb(BasicBlock *bb) {
         }
         clear_local_structs(consts, copies, exprs);
     }
+
+    eliminate_dead_stores_local(bb);
 }
 
 /* --- Liveness Analysis --- */
@@ -727,6 +988,92 @@ void unroll_loops(CFG *cfg) {
     }
 }
 
+static void merge_trivial_blocks(CFG *cfg) {
+    if (!cfg || !cfg->blocks) return;
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        BasicBlock *bb = cfg->blocks;
+        while (bb) {
+            if (bb->succ_count == 1) {
+                BasicBlock *succ = bb->succs[0];
+                // If successor only has us as a parent, and it's not a self-loop
+                if (succ->pred_count == 1 && succ != bb && succ != cfg->entry) {
+                    
+                    // 1. Strip the GOTO from the end of the parent block
+                    if (bb->last && bb->last->kind == IR_GOTO) {
+                        IRInstr *p = bb->instrs, *prev = NULL;
+                        while(p && p != bb->last) { prev = p; p = p->next; }
+                        if (prev) prev->next = NULL;
+                        else bb->instrs = NULL;
+                        bb->last = prev;
+                    }
+                    
+                    // 2. Append the successor's instructions (skipping its label)
+                    IRInstr *to_add = succ->instrs;
+                    if (to_add && to_add->kind == IR_LABEL) to_add = to_add->next;
+
+                    if (to_add) {
+                        if (bb->last) bb->last->next = to_add;
+                        else bb->instrs = to_add;
+                        bb->last = succ->last;
+                    }
+
+                    // 3. Adopt the successor's children
+                    free(bb->succs);
+                    bb->succ_count = succ->succ_count;
+                    bb->succs = malloc(sizeof(BasicBlock*) * bb->succ_count);
+                    for (int i = 0; i < bb->succ_count; i++) {
+                        bb->succs[i] = succ->succs[i];
+                        BasicBlock *child = bb->succs[i];
+                        for (int j = 0; j < child->pred_count; j++) {
+                            if (child->preds[j] == succ) child->preds[j] = bb;
+                        }
+                    }
+
+                    // 4. Orphan the successor so it gets deleted by unreachable elimination
+                    succ->pred_count = 0;
+                    succ->succ_count = 0;
+                    changed = 1;
+                }
+            }
+            bb = bb->next;
+        }
+    }
+}
+
+/* --- Tail Call Optimization (TCO) Detection --- */
+
+static void detect_tail_calls(IRFunc *f) {
+    if (!f || !f->instrs) return;
+    
+    IRInstr *curr = f->instrs;
+    while (curr) {
+        if (curr->kind == IR_CALL || curr->kind == IR_CALL_INDIRECT) {
+            IRInstr *next = curr->next;
+            
+            // Check if the very next instruction is a return
+            if (next && next->kind == IR_RETURN) {
+                int is_tail = 0;
+                
+                // Case 1: Void function (no result expected, no return value)
+                if (!curr->result && !next->src.name && !next->src.is_const) {
+                    is_tail = 1; 
+                } 
+                // Case 2: Value function (Return variable exactly matches Call result variable)
+                else if (curr->result && next->src.name && strcmp(curr->result, next->src.name) == 0) {
+                    is_tail = 1; 
+                }
+                
+                if (is_tail) {
+                    curr->is_tail_call = 1; // Flag it for the RISC-V Generator!
+                }
+            }
+        }
+        curr = curr->next;
+    }
+}
+
 /* --- Main Optimization Pipeline --- */
 
 void optimize_program(IRProgram *prog) {
@@ -734,9 +1081,12 @@ void optimize_program(IRProgram *prog) {
 
     IRFunc *f = prog->funcs;
     while (f) {
+        /* Phase 1: Initial simplification pass (Jump threading, branch folding) */
+        f->instrs = simplify_control_flow(f->instrs);
+
         CFG *cfg = build_cfg(f);
         if (cfg) {
-            /* Phase 2: Local optimizations (CSE, CP, Fold, Alg, StrReduct) */
+            /* Phase 2: Local optimizations (CSE, CP, Fold, Alg, StrReduct, DSE) */
             BasicBlock *bb = cfg->blocks;
             while (bb) {
                 optimize_bb(bb);
@@ -747,12 +1097,33 @@ void optimize_program(IRProgram *prog) {
             eliminate_unreachable_blocks(cfg);
             eliminate_dead_code(cfg);
 
-            /* Phase 4: Loop optimizations (LICM, Unrolling) */
+            /* Phase 4: Control Flow Graph structural improvements */
+            merge_trivial_blocks(cfg);
+            eliminate_unreachable_blocks(cfg); // Clean up orphaned blocks
+
+            /* Phase 5: Loop optimizations (LICM, Unrolling) */
             optimize_loops(cfg); 
-            // unroll_loops(cfg);
+            unroll_loops(cfg); // ENABLED: Massive win for small array processing
 
             f->instrs = flatten_cfg(cfg);
             free_cfg(cfg);
+            
+            /* Phase 6: Final Control flow simplification cleanup */
+            f->instrs = simplify_control_flow(f->instrs);
+            
+            /* One more pass of unreachable block removal might be needed after folding IFs */
+            cfg = build_cfg(f);
+            if (cfg) {
+                eliminate_unreachable_blocks(cfg);
+                f->instrs = flatten_cfg(cfg);
+                free_cfg(cfg);
+            }
+            
+            /* Final polish to thread any remaining newly created jumps */
+            f->instrs = simplify_control_flow(f->instrs);
+
+            /* Final pass to detect and flag Tail Calls */
+            detect_tail_calls(f);
         }
         f = f->next;
     }

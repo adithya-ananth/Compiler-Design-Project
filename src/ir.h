@@ -47,6 +47,9 @@ typedef struct IRInstr {
     IROpKind kind;
     int line;       /* source line for debugging */
 
+    /* Flag for Tail Call Optimization */
+    int is_tail_call;
+
     /* For IR_ASSIGN, IR_BINOP, IR_UNOP, IR_LOAD: result location */
     char *result;
 
