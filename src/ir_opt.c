@@ -294,11 +294,17 @@ static int fold_constants(IRInstr *instr) {
             case '*': val = instr->left.const_val * instr->right.const_val; break;
             case '/': 
                 if (instr->right.const_val != 0) val = instr->left.const_val / instr->right.const_val; 
-                else valid = 0;
+                else {
+                    printf("Semantic Error: Division by zero detected at line %d\n", instr->line);
+                    valid = 0;
+                }
                 break;
             case '%':
                 if (instr->right.const_val != 0) val = instr->left.const_val % instr->right.const_val;
-                else valid = 0;
+                else {
+                    printf("Semantic Error: Modulo by zero detected at line %d\n", instr->line);
+                    valid = 0;
+                }
                 break;
             case '<': val = instr->left.const_val < instr->right.const_val; break;
             case '>': val = instr->left.const_val > instr->right.const_val; break;
