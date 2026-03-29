@@ -15,6 +15,7 @@ OBJS = $(BUILD_DIR)/y.tab.o \
        $(BUILD_DIR)/ir.o \
        $(BUILD_DIR)/ir_gen.o \
        $(BUILD_DIR)/ir_opt.o \
+       $(BUILD_DIR)/ir_sched.o \
        $(BUILD_DIR)/reg_alloc.o \
        $(BUILD_DIR)/riscv_gen.o
 #        $(BUILD_DIR)/ir_opt.o

@@ -16,6 +16,7 @@
 #include <string.h>
 #include "reg_alloc.h"
 #include "ir_opt.h"
+#include "ir_sched.h"
 
 /* -----------------------------------------------------------------------
  * Physical register table
@@ -505,6 +506,11 @@ static RegAllocResult *allocate_function(IRFunc *f) {
 
     for (;;) {
         rounds++;
+
+        /* Phase 0: Instruction Scheduling (only on the first round before any spill rewrites) */
+        if (rounds == 1) {
+            ir_schedule_function(f);
+        }
 
         /* Build CFG + liveness for (possibly rewritten) function */
         CFG *cfg = build_cfg(f);
