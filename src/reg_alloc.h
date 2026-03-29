@@ -27,11 +27,11 @@
  * -----------------------------------------------------------------------
  * Caller-saved (scratch): t0-t6  → 7 registers
  * Callee-saved           : s1-s11 → 11 registers  (s0 = frame pointer, off-limits)
- * Total colors K = 18
+ * Total colors K = 15
  */
-#define RA_NUM_REGS 18
+#define RA_NUM_REGS 15
 /* First callee-saved register index in RA_REG_NAMES (s1 starts here) */
-#define RA_FIRST_CALLEE_SAVED 7
+#define RA_FIRST_CALLEE_SAVED 4
 
 extern const char *RA_REG_NAMES[RA_NUM_REGS]; /* defined in reg_alloc.c */
 
@@ -51,6 +51,7 @@ typedef struct IGNode {
 
     /* Bookkeeping during simplify/select */
     int    removed;       /* 1 if already pushed onto the simplify stack  */
+    int    interferes_with_caller_saved; /* 1 if live across a call */
 } IGNode;
 
 /* -----------------------------------------------------------------------

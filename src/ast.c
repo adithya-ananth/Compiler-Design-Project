@@ -34,6 +34,8 @@ const char* node_type_to_string(NodeType type) {
         case NODE_MEMBER_ACCESS: return "MEMBER_ACCESS";
         case NODE_STRUCT_DEF: return "STRUCT_DEF";
         case NODE_ACCESS_SPEC: return "ACCESS_SPEC";
+        case NODE_PRINTF: return "PRINTF";
+        case NODE_SCANF: return "SCANF";
         default: return "UNKNOWN";
     }
 }
@@ -333,6 +335,20 @@ ASTNode* create_continue_node(void) {
     return create_node(NODE_CONTINUE);
 }
 
+ASTNode* create_printf_node(ASTNode *fmt, ASTNode *args) {
+    ASTNode *node = create_node(NODE_PRINTF);
+    node->left = fmt;   // Format string
+    node->right = args; // Arguments
+    return node;
+}
+
+ASTNode* create_scanf_node(ASTNode *fmt, ASTNode *args) {
+    ASTNode *node = create_node(NODE_SCANF);
+    node->left = fmt;   // Format string
+    node->right = args; // Arguments
+    return node;
+}
+
 ASTNode* append_node(ASTNode *head, ASTNode *new_node) {
     if (!new_node) return head;
 
@@ -494,7 +510,10 @@ void print_ast(ASTNode *node, int level) {
             printf("Int: %d\n", node->int_val);
             break;
         case NODE_CONST_CHAR:
-            printf("Char: '%c'\n", node->int_val);
+            printf("Char: %c (%d)\n", node->int_val, node->int_val);
+            break;
+        case NODE_STR_LIT:
+            printf("String: \"%s\"\n", node->str_val);
             break;
         case NODE_VAR:
             printf("Var: %s\n", node->str_val);
@@ -525,6 +544,20 @@ void print_ast(ASTNode *node, int level) {
             break;
         case NODE_CONTINUE:
             printf("Continue\n");
+            break;
+        case NODE_PRINTF:
+            printf("Printf\n");
+            print_indent(level + 1); printf("Format:\n");
+            print_ast(node->left, level + 2);
+            print_indent(level + 1); printf("Args:\n");
+            print_ast(node->right, level + 2);
+            break;
+        case NODE_SCANF:
+            printf("Scanf\n");
+            print_indent(level + 1); printf("Format:\n");
+            print_ast(node->left, level + 2);
+            print_indent(level + 1); printf("Args:\n");
+            print_ast(node->right, level + 2);
             break;
         default:
             printf("Unknown Node\n");

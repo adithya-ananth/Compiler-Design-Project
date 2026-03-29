@@ -102,6 +102,7 @@ Symbol *create_symbol(char *name, DataType type,
     sym->next = NULL;
     sym->next_member = NULL;
     sym->vtable_index = -1;
+    sym->is_address_taken = 0;
 
     return sym;
 }

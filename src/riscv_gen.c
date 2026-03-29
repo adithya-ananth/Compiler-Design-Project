@@ -29,24 +29,28 @@ typedef struct {
 
 static VarOffset var_offsets[256];
 static int var_count = 0;
-static int current_temp_offset = -1024;
+static int current_temp_offset = 0;
 static int param_idx = 0;
 
-static void reset_offsets(void) {
+static void reset_offsets(int locals_size) {
     var_count = 0;
-    current_temp_offset = -1024;
+    current_temp_offset = -locals_size - 32; // Start temps below named locals and some buffer
     param_idx = 0;
 }
 
 /* Look up offset for a variable via symbol table first, then a local cache. */
+/* Look up offset for a variable via symbol table first, then a local cache.
+ * We add -32 to locals from the symbol table to skip the saved register area (ra, s0, s1-s4).
+ */
 static int get_offset(const char *name) {
     Symbol *sym = lookup((char *)name);
     if (sym && sym->kind != SYM_FUNCTION && sym->kind != SYM_STRUCT)
-        return sym->frame_offset;
+        return sym->frame_offset - 32;
 
     for (int i = 0; i < var_count; i++) {
         if (strcmp(var_offsets[i].name, name) == 0) return var_offsets[i].offset;
     }
+    
     current_temp_offset -= 4;
     if (var_count < 256) {
         strncpy(var_offsets[var_count].name, name, 63);
@@ -87,7 +91,7 @@ static void load_operand(FILE *out, IROperand op, const char *dst_reg) {
     }
     if (!op.name) return;
 
-    if (strncmp(op.name, "vtable_", 7) == 0) {
+    if (strncmp(op.name, "vtable_", 7) == 0 || strncmp(op.name, ".LC", 3) == 0) {
         fprintf(out, "  la %s, %s\n", dst_reg, op.name);
         return;
     }
@@ -126,15 +130,15 @@ static void store_result(FILE *out, const char *result_name, const char *src_reg
 static void load_address(FILE *out, IROperand op, const char *dst_reg) {
     if (!op.name) return;
 
-    if (strncmp(op.name, "vtable_", 7) == 0) {
+    if (strncmp(op.name, "vtable_", 7) == 0 || strncmp(op.name, ".LC", 3) == 0) {
         fprintf(out, "  la %s, %s\n", dst_reg, op.name);
         return;
     }
     Symbol *sym = lookup((char *)op.name);
     int off = get_offset(op.name);
 
-    /* Pointers and parameters hold addresses; locals/arrays are addresses */
-    if (sym && (sym->pointer_level > 0 || sym->kind == SYM_PARAMETER)) {
+    /* Pointers, parameters, and VLAs hold addresses; locals/arrays are addresses */
+    if (sym && (sym->pointer_level > 0 || sym->kind == SYM_PARAMETER || sym->is_vla)) {
         /* Load the pointer value — may be register-allocated */
         const char *phys = get_reg(op.name);
         if (phys) {
@@ -152,10 +156,10 @@ static void load_address(FILE *out, IROperand op, const char *dst_reg) {
  * Prologue / Epilogue helpers
  * ----------------------------------------------------------------------- */
 
-/* Emit callee-saved register saves into the frame (above the 2048 base). */
-static void emit_callee_saves(FILE *out, RegAllocResult *ra) {
+/* Emit callee-saved register saves into the frame. */
+static void emit_callee_saves(FILE *out, RegAllocResult *ra, int frame_size) {
     if (!ra) return;
-    int slot = 2036; /* just below ra(2044) and s0(2040) */
+    int slot = frame_size - 12; /* ra at -4, s0 at -8 */
     for (int i = RA_FIRST_CALLEE_SAVED; i < RA_NUM_REGS; i++) {
         if (ra->callee_used[i]) {
             fprintf(out, "  sw %s, %d(sp)\n", RA_REG_NAMES[i], slot);
@@ -164,15 +168,33 @@ static void emit_callee_saves(FILE *out, RegAllocResult *ra) {
     }
 }
 
-static void emit_callee_restores(FILE *out, RegAllocResult *ra) {
+static void emit_callee_restores(FILE *out, RegAllocResult *ra, int frame_size) {
     if (!ra) return;
-    int slot = 2036;
+    int slot = frame_size - 12;
     for (int i = RA_FIRST_CALLEE_SAVED; i < RA_NUM_REGS; i++) {
         if (ra->callee_used[i]) {
             fprintf(out, "  lw %s, %d(sp)\n", RA_REG_NAMES[i], slot);
             slot -= 4;
         }
     }
+}
+
+static int calculate_frame_size(IRFunc *func, RegAllocResult *ra) {
+    int locals_size = 0;
+    Symbol *fsym = lookup(func->name);
+    if (fsym) locals_size = fsym->local_vars_size;
+
+    int callee_saves_count = 0;
+    if (ra) {
+        for (int i = RA_FIRST_CALLEE_SAVED; i < RA_NUM_REGS; i++) {
+            if (ra->callee_used[i]) callee_saves_count++;
+        }
+    }
+
+    /* 8 bytes for ra/s0 + callee saves + local variables */
+    int total = 8 + (callee_saves_count * 4) + locals_size;
+    /* Align to 16 bytes */
+    return (total + 15) & ~15;
 }
 
 /* -----------------------------------------------------------------------
@@ -185,24 +207,41 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
     fprintf(out, "  .text\n");
     fprintf(out, "  .globl main\n\n");
 
+    /* Emit string literals */
+    if (prog->strings) {
+        fprintf(out, "  .section .rodata\n");
+        StringLiteral *s = prog->strings;
+        while (s) {
+            fprintf(out, "%s:\n", s->label);
+            fprintf(out, "  .asciz \"%s\"\n", s->value);
+            s = s->next;
+        }
+        fprintf(out, "  .text\n\n");
+    }
+
     IRFunc *func = prog->funcs;
     int func_idx = 0;
 
     while (func) {
-        reset_offsets();
+        int locals_size = 0;
+        Symbol *fsym = lookup(func->name);
+        if (fsym) locals_size = fsym->local_vars_size;
+        reset_offsets(locals_size);
 
         /* Select the per-function register allocation result (if available) */
         cur_ra = (ra_results && ra_results[func_idx]) ? ra_results[func_idx] : NULL;
 
+        int frame_size = calculate_frame_size(func, cur_ra);
+
         fprintf(out, "%s:\n", func->name);
 
         /* --- PROLOGUE --- */
-        fprintf(out, "  # --- Prologue ---\n");
-        fprintf(out, "  addi sp, sp, -2048\n");
-        fprintf(out, "  sw ra, 2044(sp)\n");
-        fprintf(out, "  sw s0, 2040(sp)\n");
-        emit_callee_saves(out, cur_ra);         /* save used callee-saved regs */
-        fprintf(out, "  addi s0, sp, 2048\n\n");
+        fprintf(out, "  # --- Prologue (Frame Size: %d) ---\n", frame_size);
+        fprintf(out, "  addi sp, sp, -%d\n", frame_size);
+        fprintf(out, "  sw ra, %d(sp)\n", frame_size - 4);
+        fprintf(out, "  sw s0, %d(sp)\n", frame_size - 8);
+        emit_callee_saves(out, cur_ra, frame_size);
+        fprintf(out, "  addi s0, sp, %d\n\n", frame_size);
 
         /* --- Instruction emission --- */
         IRInstr *instr = func->instrs;
@@ -275,8 +314,19 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                     if (instr->scale > 1)
                         fprintf(out, "  li t4, %d\n  mul t1, t1, t4\n", instr->scale);
                     fprintf(out, "  add t2, t0, t1\n");
-                    fprintf(out, "  lw t3, 0(t2)\n");
-                    store_result(out, instr->result, "t3");
+                    fprintf(out, "  lw t2, 0(t2)\n");
+                    store_result(out, instr->result, "t2");
+                    break;
+
+                case IR_ALLOCA:
+                    fprintf(out, "Dynamic stack allocation (VLA)\n");
+                    load_operand(out, instr->src, "t0"); /* size in bytes */
+                    /* Round size up to multiple of 16 for alignment */
+                    fprintf(out, "  addi t0, t0, 15\n");
+                    fprintf(out, "  andi t0, t0, -16\n");
+                    fprintf(out, "  sub sp, sp, t0\n");
+                    fprintf(out, "  mv t1, sp\n");
+                    store_result(out, instr->result, "t1");
                     break;
 
                 case IR_STORE:
@@ -317,10 +367,10 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                     fprintf(out, "return\n");
                     if (instr->src.name || instr->src.is_const)
                         load_operand(out, instr->src, "a0");
-                    emit_callee_restores(out, cur_ra);  /* restore callee-saved regs */
-                    fprintf(out, "  lw ra, 2044(sp)\n");
-                    fprintf(out, "  lw s0, 2040(sp)\n");
-                    fprintf(out, "  addi sp, sp, 2048\n");
+                    emit_callee_restores(out, cur_ra, frame_size);
+                    fprintf(out, "  lw ra, %d(sp)\n", frame_size - 4);
+                    fprintf(out, "  lw s0, %d(sp)\n", frame_size - 8);
+                    fprintf(out, "  addi sp, sp, %d\n", frame_size);
                     fprintf(out, "  jr ra\n");
                     break;
 
@@ -333,10 +383,10 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
 
         /* --- Default epilogue (reached only if no explicit return) --- */
         fprintf(out, "\n  # --- Default Epilogue ---\n");
-        emit_callee_restores(out, cur_ra);
-        fprintf(out, "  lw ra, 2044(sp)\n");
-        fprintf(out, "  lw s0, 2040(sp)\n");
-        fprintf(out, "  addi sp, sp, 2048\n");
+        emit_callee_restores(out, cur_ra, frame_size);
+        fprintf(out, "  lw ra, %d(sp)\n", frame_size - 4);
+        fprintf(out, "  lw s0, %d(sp)\n", frame_size - 8);
+        fprintf(out, "  addi sp, sp, %d\n", frame_size);
         fprintf(out, "  jr ra\n\n");
 
         func = func->next;

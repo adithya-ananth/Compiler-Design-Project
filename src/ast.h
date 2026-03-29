@@ -31,7 +31,9 @@ typedef enum {
     NODE_INDEX,        /* a[i] indexing expression */
     NODE_MEMBER_ACCESS,/* struct member access (., ->) */
     NODE_STRUCT_DEF,   /* struct definition */
-    NODE_ACCESS_SPEC   /* access specifier */
+    NODE_ACCESS_SPEC,  /* access specifier */
+    NODE_PRINTF,
+    NODE_SCANF
 } NodeType;
 
 typedef struct ASTNode {
@@ -111,6 +113,8 @@ ASTNode* create_switch_node(ASTNode *cond, ASTNode *cases);
 ASTNode* create_case_node(ASTNode *expr, ASTNode *body);
 ASTNode* create_break_node(void);
 ASTNode* create_continue_node(void);
+ASTNode* create_printf_node(ASTNode *fmt, ASTNode *args);
+ASTNode* create_scanf_node(ASTNode *fmt, ASTNode *args);
 
 // List manipulation
 ASTNode* append_node(ASTNode *head, ASTNode *new_node);

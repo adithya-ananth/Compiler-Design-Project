@@ -58,6 +58,7 @@ typedef struct {
     /* Memory dependence tracking */
     SchedNode *last_store;
     SchedNode *last_call;
+    SchedNode *last_param;
     
     /* Loads since last store/call */
     SchedNode **recent_loads;
@@ -256,6 +257,17 @@ static void build_dag(SchedNode *nodes, int count) {
             if (!uses[u]->is_const) record_use(&tracker, n, uses[u]->name);
         }
         if (def) record_def(&tracker, n, def);
+
+        /* Handle Param/Call ordering */
+        if (inst->kind == IR_PARAM) {
+            if (tracker.last_param) add_edge(tracker.last_param, n);
+            if (tracker.last_call) add_edge(tracker.last_call, n);
+            tracker.last_param = n;
+        } else if (inst->kind == IR_CALL || inst->kind == IR_CALL_INDIRECT) {
+            if (tracker.last_param) add_edge(tracker.last_param, n);
+            tracker.last_call = n;
+            tracker.last_param = NULL;
+        }
     }
     
     free_tracker(&tracker);

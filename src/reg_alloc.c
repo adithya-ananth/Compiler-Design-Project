@@ -24,9 +24,9 @@
  * s0 is the frame pointer — never allocated.
  * ----------------------------------------------------------------------- */
 const char *RA_REG_NAMES[RA_NUM_REGS] = {
-    "t0", "t1", "t2", "t3", "t4", "t5", "t6",   /* caller-saved 0-6  */
-    "s1", "s2", "s3", "s4", "s5",                /* callee-saved 7-11 */
-    "s6", "s7", "s8", "s9", "s10", "s11"         /* callee-saved 12-17*/
+    "t3", "t4", "t5", "t6",                     /* caller-saved 0-3  */
+    "s1", "s2", "s3", "s4", "s5",                /* callee-saved 4-8 */
+    "s6", "s7", "s8", "s9", "s10", "s11"         /* callee-saved 9-14*/
 };
 
 /* First callee-saved index is defined in reg_alloc.h as RA_FIRST_CALLEE_SAVED */
@@ -52,6 +52,7 @@ static int ig_get_or_add(InterferenceGraph *ig, const char *name) {
     n->name   = strdup(name);
     n->color  = -1;
     n->spilled = 0;
+    n->interferes_with_caller_saved = 0;
     return ig->count++;
 }
 
@@ -100,6 +101,11 @@ static int is_allocatable(const char *name) {
     if (strncmp(name, "vtable_", 7) == 0) return 0;
     /* Skip empty string */
     if (name[0] == '\0') return 0;
+    
+    /* Skip variables whose address is taken (must stay on stack for correctness) */
+    Symbol *sym = lookup((char *)name);
+    if (sym && sym->is_address_taken) return 0;
+
     return 1;
 }
 
@@ -208,6 +214,14 @@ static InterferenceGraph *build_interference_graph(IRFunc *f, CFG *cfg) {
                     live[live_count++] = ops[j]->name;
                 }
             }
+
+            /* --- If this is a call, all variables currently in LIVE interfere with caller-saved registers --- */
+            if (instr->kind == IR_CALL || instr->kind == IR_CALL_INDIRECT) {
+                for (int j = 0; j < live_count; j++) {
+                    int v_idx = ig_get_or_add(ig, live[j]);
+                    ig->nodes[v_idx].interferes_with_caller_saved = 1;
+                }
+            }
         }
 
         free(arr);
@@ -303,6 +317,13 @@ static int select_colors(InterferenceGraph *ig,
             int nb = ig->nodes[idx].neighbours[j];
             if (ig->nodes[nb].color >= 0)
                 used[ig->nodes[nb].color] = 1;
+        }
+
+        /* If this variable is live across a call, it cannot use caller-saved registers */
+        if (ig->nodes[idx].interferes_with_caller_saved) {
+            for (int c = 0; c < RA_FIRST_CALLEE_SAVED; c++) {
+                used[c] = 1;
+            }
         }
 
         /* Assign the first free color */
@@ -636,10 +657,9 @@ void reg_alloc_free_all(RegAllocResult **results) {
 
 /* Pastel register colors for readability */
 static const char *reg_colors[RA_NUM_REGS] = {
-    "#AED6F1", "#A9DFBF", "#F9E79F", "#FAD7A0", "#D2B4DE",
-    "#F1948A", "#A3E4D7", "#85C1E9", "#82E0AA", "#F8C471",
-    "#F0B27A", "#C39BD3", "#7FB3D3", "#76D7C4", "#F1948A",
-    "#85929E", "#A2D9CE", "#FDEBD0"
+    "#FAD7A0", "#D2B4DE", "#F1948A", "#A3E4D7",
+    "#85C1E9", "#82E0AA", "#F8C471", "#F0B27A", "#C39BD3",
+    "#7FB3D3", "#76D7C4", "#F1948A", "#85929E", "#A2D9CE", "#FDEBD0"
 };
 
 void reg_alloc_export_dot(InterferenceGraph *ig, RegAllocResult *res,

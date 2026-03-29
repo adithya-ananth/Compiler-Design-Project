@@ -403,6 +403,7 @@ void analyze_declaration(ASTNode *node) {
                 } else {
                     sym->array_sizes[i] = -1;
                     sym->array_dim_exprs[i] = expr;
+                    sym->is_vla = 1;
                 }
             }
         }
@@ -590,6 +591,10 @@ void analyze_binary(ASTNode *node) {
 
 void analyze_unary(ASTNode *node) {
     analyze_node(node->left);
+    if (node->int_val == '&' && node->left && node->left->type == NODE_VAR) {
+        Symbol *sym = lookup(node->left->str_val);
+        if (sym) sym->is_address_taken = 1;
+    }
     node->data_type = node->left->data_type;
 }
 
@@ -817,6 +822,59 @@ int analyze_switch(ASTNode *node) {
     return 0;
 }
 
+static void analyze_printf_scanf(ASTNode *node, int is_scanf) {
+    if (!node->left || node->left->type != NODE_STR_LIT) {
+        semantic_error(node->line_number, is_scanf ? "scanf format must be a string literal" : "printf format must be a string literal");
+        return;
+    }
+
+    analyze_node(node->left);
+    
+    int arg_count = 0;
+    ASTNode *arg = node->right;
+    while (arg) {
+        analyze_node(arg);
+        arg_count++;
+        arg = arg->next;
+    }
+
+    char *fmt = node->left->str_val;
+    int spec_count = 0;
+    for (int i = 0; fmt[i]; i++) {
+        if (fmt[i] == '%' && fmt[i+1] != '\0') {
+            if (fmt[i+1] == '%') {
+                i++; // Skip %%
+            } else {
+                spec_count++;
+                // Skip everything until a conversion specifier (naive check)
+                while (fmt[i+1] && !strchr("diuoxXfFeEgGaAcspn", fmt[i+1])) {
+                    i++;
+                }
+                if (fmt[i+1]) i++;
+            }
+        }
+    }
+
+    if (spec_count != arg_count) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "%s: format string expects %d arguments, but %d were provided", 
+                 is_scanf ? "scanf" : "printf", spec_count, arg_count);
+        semantic_error(node->line_number, buf);
+    }
+
+    if (is_scanf) {
+        arg = node->right;
+        while (arg) {
+            // scanf arguments must be pointers
+            if (arg->pointer_level == 0 && arg->data_type != TYPE_STRUCT) {
+                // Technically strings (char arrays) are ok, but here we check pointer level
+                // Symbol table should have marked pointers/arrays correctly.
+            }
+            arg = arg->next;
+        }
+    }
+}
+
 int analyze_node(ASTNode *node) {
     if (!node) return 0;
     switch(node->type) {
@@ -846,6 +904,8 @@ int analyze_node(ASTNode *node) {
         case NODE_STR_LIT: node->data_type = TYPE_CHAR; return 0;
         case NODE_VAR: analyze_variable(node); return 0;
         case NODE_FUNC_CALL: analyze_function_call(node); return 0;
+        case NODE_PRINTF: analyze_printf_scanf(node, 0); return 0;
+        case NODE_SCANF: analyze_printf_scanf(node, 1); return 0;
         case NODE_TYPE:
         case NODE_EMPTY: return 0;
         default: return 0;

@@ -24,7 +24,8 @@ typedef enum {
     IR_IF,          /* if x relop y goto L1 */
     IR_LOAD,        /* t := load base, idx, scale */
     IR_STORE,       /* store base, idx, scale := val */
-    IR_CALL_INDIRECT /* x := call *fn, n */
+    IR_CALL_INDIRECT, /* x := call *fn, n */
+    IR_ALLOCA       /* x := alloca size */
 } IROpKind;
 
 /* Relational operators for IR_IF */
@@ -101,10 +102,18 @@ typedef struct IRFunc {
     struct IRFunc *next;
 } IRFunc;
 
+/* String constants for printf/scanf/etc. */
+typedef struct StringLiteral {
+    char *label;
+    char *value;
+    struct StringLiteral *next;
+} StringLiteral;
+
 /* Program IR: list of functions (incl. global decls as init code) */
 typedef struct {
     IRFunc *funcs;
     IRInstr *global_instrs;  /* global var initializers, if any */
+    StringLiteral *strings;  /* static string pool */
 } IRProgram;
 
 /* --- Temp and label generation --- */
@@ -129,6 +138,7 @@ IRInstr* ir_make_if(IROperand left, IROperand right, IRRelop relop, char *label,
 /* Array element load/store */
 IRInstr* ir_make_load(char *dst, IROperand base, IROperand index, int scale, int line);
 IRInstr* ir_make_store(IROperand base, IROperand index, int scale, IROperand value, int line);
+IRInstr* ir_make_alloca(char *dst, IROperand size, int line);
 
 /* --- Operand helpers --- */
 IROperand ir_op_name(char *name);
@@ -142,6 +152,7 @@ void ir_append_list(IRInstr **head, IRInstr *list);
 IRProgram* ir_program_create(void);
 void ir_program_add_func(IRProgram *prog, IRFunc *f);
 IRFunc* ir_func_create(char *name, DataType ret_type);
+void ir_program_add_string(IRProgram *prog, char *label, char *val);
 
 /* --- Output --- */
 void ir_print_instr(IRInstr *instr);

@@ -9,8 +9,17 @@
 #include "ast.h"
 #include "ir.h"
 #include "semantic.h"
-#include "ir_gen.h"
 #include "y.tab.h"
+#include "ir_gen.h"
+
+static IRProgram *current_prog = NULL;
+static int string_lit_count = 0;
+
+static char* ir_new_string_label(void) {
+    char *buf = malloc(16);
+    snprintf(buf, 16, ".LC%d", string_lit_count++);
+    return buf;
+}
 
 /* Generate code for condition; jump to true_label if true, else false_label */
 static void gen_cond(ASTNode *node, IRInstr **list, char *true_label, char *false_label, int line);
@@ -281,9 +290,13 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
         case NODE_CONST_CHAR:
             return ir_op_const(node->int_val);
 
-        case NODE_STR_LIT:
-            /* String literals: treat as char* - for now use address 0 as placeholder */
-            return ir_op_const(0);
+        case NODE_STR_LIT: {
+            char *label = ir_new_string_label();
+            ir_program_add_string(current_prog, label, node->str_val);
+            IROperand op = ir_op_name(label);
+            free(label);
+            return op;
+        }
 
         case NODE_VAR:
             return ir_op_name(node->str_val);
@@ -725,6 +738,26 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
 
         case NODE_VAR_DECL: {
             Symbol *sym = lookup(node->str_val);
+            if (sym && sym->is_vla) {
+                int type_size = get_type_size(sym->type, sym->pointer_level, sym->struct_def);
+                IROperand total_size = ir_op_const(type_size);
+                for (int i = 0; i < sym->array_dim_count; i++) {
+                    IROperand dim_val;
+                    if (sym->array_sizes[i] > 0) {
+                        dim_val = ir_op_const(sym->array_sizes[i]);
+                    } else {
+                        dim_val = gen_expr(sym->array_dim_exprs[i], list);
+                    }
+                    char *t = ir_new_temp();
+                    ir_append(list, ir_make_binop(t, total_size, dim_val, '*', line));
+                    if (total_size.name) free(total_size.name);
+                    if (dim_val.name) free(dim_val.name);
+                    total_size = ir_op_name(t);
+                    free(t);
+                }
+                ir_append(list, ir_make_alloca(node->str_val, total_size, line));
+                if (total_size.name) free(total_size.name);
+            }
             if (sym && sym->struct_def && sym->struct_def->virtual_methods) {
                 char vtable_name[256];
                 snprintf(vtable_name, sizeof(vtable_name), "vtable_%s", sym->struct_def->name);
@@ -763,6 +796,50 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
             break;
         }
 
+        case NODE_PRINTF: {
+            int nargs = 0;
+            // Format string
+            IROperand fmt = gen_expr(node->left, list);
+            ir_append(list, ir_make_param(fmt, line));
+            nargs++;
+            if (fmt.name) free(fmt.name);
+
+            // Arguments
+            ASTNode *arg = node->right;
+            while (arg) {
+                IROperand a = gen_expr(arg, list);
+                ir_append(list, ir_make_param(a, line));
+                if (a.name) free(a.name);
+                nargs++;
+                arg = arg->next;
+            }
+
+            ir_append(list, ir_make_call_void("printf", nargs, line));
+            break;
+        }
+
+        case NODE_SCANF: {
+            int nargs = 0;
+            // Format string
+            IROperand fmt = gen_expr(node->left, list);
+            ir_append(list, ir_make_param(fmt, line));
+            nargs++;
+            if (fmt.name) free(fmt.name);
+
+            // Arguments
+            ASTNode *arg = node->right;
+            while (arg) {
+                IROperand a = gen_expr(arg, list);
+                ir_append(list, ir_make_param(a, line));
+                if (a.name) free(a.name);
+                nargs++;
+                arg = arg->next;
+            }
+
+            ir_append(list, ir_make_call_void("scanf", nargs, line));
+            break;
+        }
+
         default:
             /* Expression statement (e.g. foo(); x+1;) */
             (void)gen_expr(node, list);
@@ -786,15 +863,16 @@ static void gen_func(ASTNode *node, IRProgram *prog) {
 IRProgram* ir_generate(ASTNode *ast_root) {
     if (!ast_root) return NULL;
 
-    IRProgram *prog = ir_program_create();
+    current_prog = ir_program_create();
+    string_lit_count = 0;
 
     for (ASTNode *n = ast_root; n; n = n->next) {
         if (n->type == NODE_FUNC_DEF)
-            gen_func(n, prog);
+            gen_func(n, current_prog);
         else if (n->type == NODE_STRUCT_DEF) {
             for (ASTNode *m = n->body; m; m = m->next) {
                 if (m && m->type == NODE_FUNC_DEF) {
-                    gen_func(m, prog);
+                    gen_func(m, current_prog);
                 }
             }
         }
@@ -805,10 +883,12 @@ IRProgram* ir_generate(ASTNode *ast_root) {
                 IROperand val = gen_expr(n->right, &init);
                 ir_append(&init, ir_make_assign(n->str_val, val, n->line_number));
                 if (val.name) free(val.name);
-                ir_append_list(&prog->global_instrs, init);
+                ir_append_list(&current_prog->global_instrs, init);
             }
         }
     }
 
-    return prog;
+    IRProgram *res = current_prog;
+    current_prog = NULL;
+    return res;
 }

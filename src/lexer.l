@@ -42,6 +42,8 @@ const char *token_name(int token) {
         case T_PRIVATE: return "T_PRIVATE";
         case T_COLON:   return "T_COLON";
         case T_ARROW:   return "T_ARROW";
+        case T_PRINTF:  return "T_PRINTF";
+        case T_SCANF:   return "T_SCANF";
 
         case T_IDENT:   return "T_IDENT";
         case T_NUMBER:  return "T_NUMBER";
@@ -106,6 +108,8 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "default"   { SAVE_POS(); ADVANCE(); return T_DEFAULT; }
 "break"     { SAVE_POS(); ADVANCE(); return T_BREAK; }
 "continue"  { SAVE_POS(); ADVANCE(); return T_CONTINUE; }
+"printf"    { SAVE_POS(); ADVANCE(); return T_PRINTF; }
+"scanf"     { SAVE_POS(); ADVANCE(); return T_SCANF; }
 
  /* ---------- Multi-char operators ---------- */
 "=="        { SAVE_POS(); ADVANCE(); return T_EQ; }

@@ -1,0 +1,92 @@
+Parsing...
+
+=========== SYMBOL TABLE ===========
+Scope Level: 2
+Name: x          | Type: int    | Kind: variable  | Line: 2 | Scope: 2 | Offset: -4
+Name: y          | Type: int    | Kind: variable  | Line: 3 | Scope: 2 | Offset: -8
+------------------------------------
+Scope Level: 1
+------------------------------------
+Scope Level: 0
+Name: main       | Type: int    | Kind: function  | Line: 9 | Scope: 0 | Offset: 0 | L_Size: 8
+------------------------------------
+====================================
+Semantic analysis successful.
+
+=========== IR (Three-Address Code) ===========
+function main:
+  x := 42
+  param .LC0
+  param x
+  call printf, 2
+  param .LC1
+  call printf, 1
+  param .LC2
+  t0 = &y
+  param t0
+  call scanf, 2
+  param .LC3
+  param y
+  call printf, 2
+  return 0
+
+===============================================
+Optimizing IR...
+Optimization complete. Optimized IR printed below:
+
+=========== IR (Three-Address Code) ===========
+function main:
+  param .LC0
+  param 42
+  call printf, 2
+  param .LC1
+  call printf, 1
+  param .LC2
+  t0 = &y
+  param t0
+  call scanf, 2
+  param .LC3
+  param y
+  call printf, 2
+  return 0
+
+===============================================
+Running register allocation...
+[reg_alloc] Interference graph written to main_interference.dot
+Register allocation complete.
+Parsing Done with 0 errors
+AST Structure:
+FunctionDef: main
+  Return Type:
+    Type (token 258)
+  Params:
+  Body:
+    Block
+      VarDecl: x
+        Type (token 258)
+        Initializer:
+          Int: 42
+      VarDecl: y
+        Type (token 258)
+      Printf
+        Format:
+          String: "The value of x is %d\n"
+        Args:
+          Var: x
+      Printf
+        Format:
+          String: "Please enter a value for y: "
+        Args:
+      Scanf
+        Format:
+          String: "%d"
+        Args:
+          UnOp: &
+            Var: y
+      Printf
+        Format:
+          String: "You entered %d\n"
+        Args:
+          Var: y
+      Return
+        Int: 0

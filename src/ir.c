@@ -12,6 +12,7 @@
 
 static int temp_counter = 0;
 static int label_counter = 0;
+static int string_counter = 0;
 
 /* --- Temp and label generation --- */
 char* ir_new_temp(void) {
@@ -29,6 +30,7 @@ char* ir_new_label(void) {
 void ir_reset_temps(void) {
     temp_counter = 0;
     label_counter = 0;
+    string_counter = 0;
 }
 
 /* --- Operand helpers --- */
@@ -202,6 +204,15 @@ IRInstr* ir_make_store(IROperand base, IROperand index, int scale, IROperand val
     return i;
 }
 
+IRInstr* ir_make_alloca(char *dst, IROperand size, int line) {
+    IRInstr *i = calloc(1, sizeof(IRInstr));
+    i->kind = IR_ALLOCA;
+    i->line = line;
+    i->result = dst ? strdup(dst) : NULL;
+    i->src = op_dup(&size); // size operand stored in 'src'
+    return i;
+}
+
 /* --- List management --- */
 void ir_append(IRInstr **head, IRInstr *instr) {
     if (!instr) return;
@@ -240,6 +251,15 @@ IRFunc* ir_func_create(char *name, DataType ret_type) {
     f->ret_type = ret_type;
     f->instrs = NULL;
     return f;
+}
+
+void ir_program_add_string(IRProgram *prog, char *label, char *val) {
+    if (!prog || !label || !val) return;
+    StringLiteral *s = calloc(1, sizeof(StringLiteral));
+    s->label = strdup(label);
+    s->value = strdup(val);
+    s->next = prog->strings;
+    prog->strings = s;
 }
 
 /* --- Print operand --- */
@@ -371,7 +391,11 @@ void ir_print_instr(IRInstr *instr) {
             print_operand(&instr->store_val);
             printf("\n");
             break;
-
+        case IR_ALLOCA:
+            printf("  %s := alloca ", instr->result);
+            print_operand(&instr->src);
+            printf("\n");
+            break;
     }
 }
 
@@ -486,6 +510,12 @@ void ir_export_to_file(IRProgram *prog, const char *filename) {
                     else fprintf(f, "%s", i->store_val.name);
                     fprintf(f, "\n");
                     break;
+                case IR_ALLOCA:
+                    fprintf(f, "  %s := alloca ", i->result);
+                    if (i->src.is_const) fprintf(f, "%d", i->src.const_val);
+                    else fprintf(f, "%s", i->src.name);
+                    fprintf(f, "\n");
+                    break;
             }
         }
         fprintf(f, "\n");
@@ -544,9 +574,12 @@ void ir_free_instr(IRInstr *instr) {
                 if (instr->index.name) free(instr->index.name);
                 break;
             case IR_STORE:
-                if (instr->base.name) free(instr->base.name);
                 if (instr->index.name) free(instr->index.name);
                 if (instr->store_val.name) free(instr->store_val.name);
+                break;
+            case IR_ALLOCA:
+                if (instr->result) free(instr->result);
+                if (instr->src.name) free(instr->src.name);
                 break;
         }
         free(instr);
@@ -568,5 +601,15 @@ void ir_free_program(IRProgram *prog) {
     if (!prog) return;
     ir_free_func(prog->funcs);
     ir_free_instr(prog->global_instrs);
+    
+    StringLiteral *s = prog->strings;
+    while (s) {
+        StringLiteral *next = s->next;
+        free(s->label);
+        free(s->value);
+        free(s);
+        s = next;
+    }
+    
     free(prog);
 }

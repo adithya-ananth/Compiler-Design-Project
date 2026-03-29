@@ -56,7 +56,7 @@ ASTNode *root = NULL;
 
 /* Tokens */
 %token <intval> T_INT T_VOID T_CHAR T_STRUCT T_VIRTUAL T_CLASS T_PUBLIC T_PRIVATE T_COLON
-%token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK T_CONTINUE
+%token <intval> T_IF T_ELSE T_WHILE T_FOR T_RETURN T_SWITCH T_CASE T_DEFAULT T_BREAK T_CONTINUE T_PRINTF T_SCANF
 %token <str>    T_IDENT T_STRING_LIT
 %token <intval> T_NUMBER T_CHAR_LIT
 %token <intval> T_ARROW T_TILDE
@@ -374,6 +374,24 @@ statement
     | iteration_statement { $$ = $1; }
     | jump_statement { $$ = $1; }
     | switch_statement { $$ = $1; }
+    | T_PRINTF '(' T_STRING_LIT ')' ';' {
+        ASTNode *fmt = create_str_node($3);
+        SET_LINE(fmt);
+        $$ = create_printf_node(fmt, NULL);
+        SET_LINE($$);
+    }
+    | T_PRINTF '(' T_STRING_LIT ',' argument_expression_list ')' ';' {
+        ASTNode *fmt = create_str_node($3);
+        SET_LINE(fmt);
+        $$ = create_printf_node(fmt, $5);
+        SET_LINE($$);
+    }
+    | T_SCANF '(' T_STRING_LIT ',' argument_expression_list ')' ';' {
+        ASTNode *fmt = create_str_node($3);
+        SET_LINE(fmt);
+        $$ = create_scanf_node(fmt, $5);
+        SET_LINE($$);
+    }
     ;
 
 compound_statement
@@ -733,11 +751,13 @@ int main(int argc, char **argv) {
             print_vtables();
             ir_export_to_file(ir, "ir.txt");
 
+/*
             printf("Optimizing IR...\n");
             optimize_program(ir);
             printf("Optimization complete. Optimized IR printed below:\n");
             ir_print_program(ir);
             ir_export_to_file(ir, "ir_opt.txt");
+*/
 
             /* Register allocation (Chaitin's graph coloring) */
             printf("Running register allocation...\n");

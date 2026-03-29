@@ -62,6 +62,7 @@ typedef struct Symbol {
      *   -1   => array parameter declared with [], size not specified
      */
     int array_size;
+    int is_vla;  // 1 if this is a variable length array
 
     // New: pointer and multi-dim array info
     int pointer_level;
@@ -82,6 +83,9 @@ typedef struct Symbol {
     int is_virtual;
     // For virtual functions: index in vtable
     int vtable_index;
+
+    // Address-taken flag for register allocation
+    int is_address_taken;
 
     struct Symbol *next;          // hash chaining
     struct Symbol *next_member;   // linked list for struct/class members
