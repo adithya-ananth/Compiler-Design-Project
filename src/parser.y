@@ -7,6 +7,7 @@
 #include "semantic.h"
 #include "ir_gen.h"
 #include "ir_opt.h"
+#include "reg_alloc.h"
 #include "riscv_gen.h"
 
 void print_vtables() {
@@ -738,7 +739,13 @@ int main(int argc, char **argv) {
             ir_print_program(ir);
             ir_export_to_file(ir, "ir_opt.txt");
 
-            riscv_generate(ir, "output.s");
+            /* Register allocation (Chaitin's graph coloring) */
+            printf("Running register allocation...\n");
+            RegAllocResult **ra_results = reg_alloc_program(ir);
+            printf("Register allocation complete.\n");
+
+            riscv_generate(ir, ra_results, "output.s");
+            reg_alloc_free_all(ra_results);
 
             ir_free_program(ir);
           }
