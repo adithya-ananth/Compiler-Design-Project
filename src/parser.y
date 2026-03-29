@@ -751,13 +751,13 @@ int main(int argc, char **argv) {
             print_vtables();
             ir_export_to_file(ir, "ir.txt");
 
-/*
+
             printf("Optimizing IR...\n");
             optimize_program(ir);
             printf("Optimization complete. Optimized IR printed below:\n");
             ir_print_program(ir);
             ir_export_to_file(ir, "ir_opt.txt");
-*/
+
 
             /* Register allocation (Chaitin's graph coloring) */
             printf("Running register allocation...\n");
