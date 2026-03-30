@@ -1032,46 +1032,56 @@ void unroll_loops(CFG *cfg) {
     while (b) {
         for (int i = 0; i < b->succ_count; i++) {
             BasicBlock *h = b->succs[i];
-            
+
             /* Detect Back-edge (Loop) */
-            if (b->doms[h->id]) {
-                
-                /* Count instructions in the loop latch (body) */
-                int count = 0;
-                IRInstr *cur = b->instrs;
-                while (cur && cur != b->last) { count++; cur = cur->next; }
-                
-                /* Safety limit: Only unroll small bodies to prevent massive code bloat */
-                if (count == 0 || count > 15) continue;
+            if (!b->doms[h->id]) continue;
+            if (!h->last || h->last->kind != IR_IF) continue;
+            if (!h->last->if_right.is_const) continue;  /* only constant-bound loops */
+            if (!b->last || b->last->kind != IR_GOTO) continue;
 
-                /* Duplicate the loop body */
-                IRInstr *head_copy = NULL, *tail_copy = NULL;
-                cur = b->instrs;
-                while (cur && cur != b->last) {
-                    // IRInstr *dup = copy_instr(cur);
-                    // if (!head_copy) head_copy = dup;
-                    // if (tail_copy) tail_copy->next = dup;
-                    // tail_copy = dup;
+            /* Ensure the back-edge points to the header attested by a label */
+            char *header_label = NULL;
+            if (h->instrs && h->instrs->kind == IR_LABEL) header_label = h->instrs->label;
+            if (!header_label || strcmp(b->last->label, header_label) != 0) continue;
 
-                    if (cur->kind != IR_LABEL) { 
-                        IRInstr *dup = copy_instr(cur);
-                        if (!head_copy) head_copy = dup;
-                        if (tail_copy) tail_copy->next = dup;
-                        tail_copy = dup;
-                    }
-                    
-                    cur = cur->next;
+            /* Limit body size */
+            int count = 0;
+            IRInstr *cur = b->instrs;
+            while (cur && cur != b->last) { if (cur->kind != IR_LABEL) count++; cur = cur->next; }
+            if (count == 0 || count > 15) continue;
+
+            /* Duplicate the loop latch body, with a mid-check to preserve odd-trip safety. */
+            IRInstr *body1_head = NULL, *body1_tail = NULL;
+            IRInstr *body2_head = NULL, *body2_tail = NULL;
+
+            cur = b->instrs;
+            while (cur && cur != b->last) {
+                if (cur->kind != IR_LABEL) {
+                    IRInstr *dup1 = copy_instr(cur);
+                    if (!body1_head) body1_head = dup1;
+                    if (body1_tail) body1_tail->next = dup1;
+                    body1_tail = dup1;
+
+                    IRInstr *dup2 = copy_instr(cur);
+                    if (!body2_head) body2_head = dup2;
+                    if (body2_tail) body2_tail->next = dup2;
+                    body2_tail = dup2;
                 }
+                cur = cur->next;
+            }
 
-                /* Splice the duplicate into the linked list right before the jump */
-                if (head_copy) {
-                    IRInstr *prev = b->instrs;
-                    while (prev && prev->next != b->last) prev = prev->next;
-                    
-                    if (prev) {
-                        prev->next = head_copy;
-                        tail_copy->next = b->last;
-                    }
+            if (body1_head && body2_head) {
+                /* Insert mid-check after first copy, before second. */
+                IRInstr *mid_check = copy_instr(h->last);
+                body1_tail->next = mid_check;
+                mid_check->next = body2_head;
+                body2_tail->next = b->last;
+
+                /* Splice into original block and maintain tail to goto */
+                IRInstr *prev = b->instrs;
+                while (prev && prev->next != b->last) prev = prev->next;
+                if (prev) {
+                    prev->next = body1_head;
                 }
             }
         }
