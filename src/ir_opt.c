@@ -994,6 +994,91 @@ void optimize_loops(CFG *cfg) {
     }
 }
 
+/* --- Loop Unrolling --- */
+
+/* Helper to safely deep-copy an instruction */
+static IRInstr* copy_instr(IRInstr *src_inst) {
+    if (!src_inst) return NULL;
+    IRInstr *dup = malloc(sizeof(IRInstr));
+    memcpy(dup, src_inst, sizeof(IRInstr));
+    dup->next = NULL;
+
+    /* Deep copy strings to prevent double-free crashes */
+    if (src_inst->result) dup->result = strdup(src_inst->result);
+    if (src_inst->label) dup->label = strdup(src_inst->label);
+    if (src_inst->call_fn) dup->call_fn = strdup(src_inst->call_fn);
+
+    /* Helper macro for IROperand deep copy */
+    #define DUP_OP(op) if (!src_inst->op.is_const && src_inst->op.name) dup->op.name = strdup(src_inst->op.name)
+    DUP_OP(src);
+    DUP_OP(left);
+    DUP_OP(right);
+    DUP_OP(unop_src);
+    DUP_OP(if_left);
+    DUP_OP(if_right);
+    DUP_OP(base);
+    DUP_OP(index);
+    DUP_OP(store_val);
+    #undef DUP_OP
+
+    return dup;
+}
+
+void unroll_loops(CFG *cfg) {
+    if (!cfg) return;
+    compute_dominators(cfg);
+
+    BasicBlock *b = cfg->blocks;
+    while (b) {
+        for (int i = 0; i < b->succ_count; i++) {
+            BasicBlock *h = b->succs[i];
+            
+            /* Detect Back-edge (Loop) */
+            if (b->doms[h->id]) {
+                
+                /* Count instructions in the loop latch (body) */
+                int count = 0;
+                IRInstr *cur = b->instrs;
+                while (cur && cur != b->last) { count++; cur = cur->next; }
+                
+                /* Safety limit: Only unroll small bodies to prevent massive code bloat */
+                if (count == 0 || count > 15) continue;
+
+                /* Duplicate the loop body */
+                IRInstr *head_copy = NULL, *tail_copy = NULL;
+                cur = b->instrs;
+                while (cur && cur != b->last) {
+                    // IRInstr *dup = copy_instr(cur);
+                    // if (!head_copy) head_copy = dup;
+                    // if (tail_copy) tail_copy->next = dup;
+                    // tail_copy = dup;
+
+                    if (cur->kind != IR_LABEL) { 
+                        IRInstr *dup = copy_instr(cur);
+                        if (!head_copy) head_copy = dup;
+                        if (tail_copy) tail_copy->next = dup;
+                        tail_copy = dup;
+                    }
+                    
+                    cur = cur->next;
+                }
+
+                /* Splice the duplicate into the linked list right before the jump */
+                if (head_copy) {
+                    IRInstr *prev = b->instrs;
+                    while (prev && prev->next != b->last) prev = prev->next;
+                    
+                    if (prev) {
+                        prev->next = head_copy;
+                        tail_copy->next = b->last;
+                    }
+                }
+            }
+        }
+        b = b->next;
+    }
+}
+
 static void merge_trivial_blocks(CFG *cfg) {
     if (!cfg || !cfg->blocks) return;
     int changed = 1;
@@ -1109,6 +1194,7 @@ void optimize_program(IRProgram *prog) {
             mark_reachable_and_cleanup(cfg); 
 
             optimize_loops(cfg); 
+            unroll_loops(cfg);
             
             f->instrs = flatten_cfg(cfg);
             free_cfg(cfg);
