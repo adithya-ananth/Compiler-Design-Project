@@ -274,7 +274,13 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
         fprintf(out, "  sw s0, %d(sp)\n", frame_size - 8);
         emit_callee_saves(out, cur_ra, frame_size);
         fprintf(out, "  addi s0, sp, %d\n\n", frame_size);
- 
+
+        /* --- Tail recursion entry point --- */
+        char tail_entry_label[128];
+        snprintf(tail_entry_label, sizeof(tail_entry_label), "%s_tail_entry", func->name);
+        fprintf(out, "  # Tail recursion entry point\n");
+        fprintf(out, "%s:\n\n", tail_entry_label);
+
         /* --- Move parameters from a0-a7 to assigned locations --- */
         if (fsym && fsym->kind == SYM_FUNCTION) {
             for (int i = 0; i < fsym->param_count && i < 8; i++) {
@@ -297,6 +303,7 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
         }
 
         /* --- Instruction emission --- */
+        int skip_return = 0;
         IRInstr *instr = func->instrs;
         while (instr) {
             fprintf(out, "  # Line %d: ", instr->line);
@@ -401,6 +408,27 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
 
                 case IR_CALL:
                     fprintf(out, "Call %s\n", instr->call_fn);
+                    if (instr->is_tail_call && instr->call_fn && strcmp(instr->call_fn, func->name) == 0) {
+                        /* Self-tail recursion: reuse the current stack frame. */
+                        fprintf(out, "  # Tail recursive self-call: reuse frame and jump to body\n");
+                        fprintf(out, "  j %s\n", tail_entry_label);
+                        param_idx = 0;
+                        skip_return = 1;
+                        break;
+                    }
+                    if (instr->is_tail_call) {
+                        /* Tail call to a different function: unwind frame and jump to callee. */
+                        fprintf(out, "  # Tail call to another function: unwind current frame\n");
+                        fprintf(out, "  addi sp, s0, -%d\n", frame_size);
+                        emit_callee_restores(out, cur_ra, frame_size);
+                        fprintf(out, "  lw ra, %d(sp)\n", frame_size - 4);
+                        fprintf(out, "  lw s0, %d(sp)\n", frame_size - 8);
+                        fprintf(out, "  addi sp, sp, %d\n", frame_size);
+                        fprintf(out, "  j %s\n", instr->call_fn);
+                        param_idx = 0;
+                        skip_return = 1;
+                        break;
+                    }
                     fprintf(out, "  call %s\n", instr->call_fn);
                     if (instr->result && strlen(instr->result) > 0)
                         store_result(out, instr->result, "a0");
@@ -417,6 +445,10 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                     break;
 
                 case IR_RETURN:
+                    if (skip_return) {
+                        skip_return = 0;
+                        break;
+                    }
                     fprintf(out, "return\n");
                     if (instr->src.name || instr->src.is_const)
                         load_operand(out, instr->src, "a0");

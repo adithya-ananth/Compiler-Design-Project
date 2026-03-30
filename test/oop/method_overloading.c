@@ -17,5 +17,7 @@ int main() {
     Calculator c;
     int a = c.add(10, 20);
     int b = c.add(5);
+    printf("a = %d\n", a);
+    printf("b = %d\n", b);
     return 0;
 }

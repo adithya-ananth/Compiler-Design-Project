@@ -554,6 +554,7 @@ void analyze_member_access(ASTNode *node) {
         node->member_offset = 0;
         return;
     }
+    printf("ACCESS CHECK: member=%s, mod=%d, curr=%p, struct_def=%p\n", member->name, member->access_modifier, current_class, struct_def);
 
     if (member->access_modifier == 1) { 
         if (!current_class || current_class != struct_def) {

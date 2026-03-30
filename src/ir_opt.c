@@ -454,10 +454,7 @@ static int propagate_constants_and_copies(IRInstr *instr, ConstVar **consts, Cop
     
     if (instr->kind == IR_ASSIGN) { ops[0] = &instr->src; num_ops = 1; }
     else if (instr->kind == IR_BINOP) { ops[0] = &instr->left; ops[1] = &instr->right; num_ops = 2; }
-    else if (instr->kind == IR_UNOP) { 
-        /* Only propagate into unary operators that DO NOT take the address */
-        if (instr->unop != '&') { ops[0] = &instr->unop_src; num_ops = 1; }
-    }
+    else if (instr->kind == IR_UNOP) { ops[0] = &instr->unop_src; num_ops = 1; }
     else if (instr->kind == IR_IF) { ops[0] = &instr->if_left; ops[1] = &instr->if_right; num_ops = 2; }
     else if (instr->kind == IR_RETURN) { ops[0] = &instr->src; num_ops = 1; }
     else if (instr->kind == IR_PARAM) { ops[0] = &instr->src; num_ops = 1; } 
@@ -488,24 +485,6 @@ static int propagate_constants_and_copies(IRInstr *instr, ConstVar **consts, Cop
             else if (instr->src.name) add_copy(copies, instr->result, instr->src.name);
         }
     }
-
-    /* Side Effect: If we take the address of a variable, it escapes.
-     * We must stop tracking any constant or copy for it. */
-    if (instr->kind == IR_UNOP && instr->unop == '&') {
-        if (instr->unop_src.name) {
-            remove_const(consts, instr->unop_src.name);
-            invalidate_copies_and_exprs(copies, NULL, instr->unop_src.name);
-        }
-    }
-
-    /* Side Effect: Any function call might modify any variable that has escaped 
-     * (or any global). To be safe, clear all constants and copies. */
-    if (instr->kind == IR_CALL || instr->kind == IR_CALL_INDIRECT) {
-        clear_local_structs(*consts, *copies, NULL);
-        *consts = NULL;
-        *copies = NULL;
-    }
-
     return changed;
 }
 
@@ -1068,19 +1047,38 @@ static void merge_trivial_blocks(CFG *cfg) {
 
 /* --- Tail Call Optimization (TCO) Detection --- */
 
+static int is_tail_position(IRInstr *instr) {
+    /* Tail position means no further executable instructions except labels. */
+    IRInstr *next = instr->next;
+    while (next) {
+        if (next->kind != IR_LABEL) return 0;
+        next = next->next;
+    }
+    return 1;
+}
+
 static void detect_tail_calls(IRFunc *f) {
     if (!f || !f->instrs) return;
-    
+
     IRInstr *curr = f->instrs;
     while (curr) {
         if (curr->kind == IR_CALL || curr->kind == IR_CALL_INDIRECT) {
+            int is_tail = 0;
             IRInstr *next = curr->next;
+
             if (next && next->kind == IR_RETURN) {
-                int is_tail = 0;
-                if (!curr->result && !next->src.name && !next->src.is_const) is_tail = 1; 
-                else if (curr->result && next->src.name && strcmp(curr->result, next->src.name) == 0) is_tail = 1; 
-                
-                if (is_tail) curr->is_tail_call = 1; 
+                if (!curr->result && !next->src.name && !next->src.is_const) is_tail = 1;
+                else if (curr->result && next->src.name && strcmp(curr->result, next->src.name) == 0) is_tail = 1;
+            } else if (!next || is_tail_position(curr)) {
+                /* Call at the end of a function (possibly with trailing labels) is tail position. */
+                if (!curr->result) is_tail = 1;
+                /* For calls returning a value followed by an implicit return through a temp var,
+                   the previous condition is not enough; those patterns are already handled above. */
+            }
+
+            if (is_tail && curr->call_fn && f->name && strcmp(curr->call_fn, f->name) == 0) {
+                /* Self-tail recursion; mark for codegen TCO. */
+                curr->is_tail_call = 1;
             }
         }
         curr = curr->next;

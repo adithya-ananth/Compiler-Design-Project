@@ -1,0 +1,15 @@
+function main:
+  x := 10
+  y := 5
+  t0 := y + 2
+  x := t0
+  i := 0
+L0:
+  if i >= 10 goto L2
+L1:
+  t1 := i + 1
+  i := t1
+  goto L0
+L2:
+  return x
+

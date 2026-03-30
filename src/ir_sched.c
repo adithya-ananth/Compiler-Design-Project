@@ -121,10 +121,6 @@ static void record_use(DepTracker *t, SchedNode *n, const char *name) {
     /* RAW: this node reads, so it depends on last def */
     if (v->last_def) add_edge(v->last_def, n);
     
-    /* Side effect: if there was a preceding call, we MUST depend on it 
-     * because the variable might have been modified by the call. */
-    if (t->last_call) add_edge(t->last_call, n);
-    
     /* Record this use */
     if (v->num_uses == v->use_cap) {
         v->use_cap = v->use_cap ? v->use_cap * 2 : 4;
@@ -139,10 +135,6 @@ static void record_def(DepTracker *t, SchedNode *n, const char *name) {
     
     /* WAW: this node writes, so it depends on last def */
     if (v->last_def) add_edge(v->last_def, n);
-    
-    /* Side effect: if there was a preceding call, we MUST depend on it 
-     * because the variable might have escaped and the call might read/write it. */
-    if (t->last_call) add_edge(t->last_call, n);
     
     /* WAR: this node writes, so it depends on all prior reads */
     for (int i = 0; i < v->num_uses; i++) {
