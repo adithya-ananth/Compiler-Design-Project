@@ -5,7 +5,7 @@
 
 Scope *current_scope = NULL;
 
-static Scope *all_scopes = NULL;
+Scope *all_scopes = NULL;
 
 unsigned int hash(char *key) {
     unsigned int h = 0;
@@ -237,4 +237,41 @@ void print_symbol_table() {
     }
 
     printf("====================================\n");
+}
+
+Symbol** get_all_structs_with_vtables(int *count) {
+    // Count how many
+    int c = 0;
+    Scope *s = all_scopes;
+    while (s) {
+        for (int i = 0; i < TABLE_SIZE; i++) {
+            Symbol *sym = s->table[i];
+            while (sym) {
+                if (sym->kind == SYM_STRUCT && sym->virtual_methods) {
+                    c++;
+                }
+                sym = sym->next;
+            }
+        }
+        s = s->next_scope;
+    }
+
+    Symbol **list = malloc(sizeof(Symbol*) * c);
+    int idx = 0;
+    s = all_scopes;
+    while (s) {
+        for (int i = 0; i < TABLE_SIZE; i++) {
+            Symbol *sym = s->table[i];
+            while (sym) {
+                if (sym->kind == SYM_STRUCT && sym->virtual_methods) {
+                    list[idx++] = sym;
+                }
+                sym = sym->next;
+            }
+        }
+        s = s->next_scope;
+    }
+
+    *count = c;
+    return list;
 }

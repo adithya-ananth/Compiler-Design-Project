@@ -35,13 +35,13 @@ static RegAllocResult *cur_ra = NULL; /* NULL when running without allocator */
 
 static void reset_offsets(int locals_size) {
     var_count = 0;
-    current_temp_offset = -locals_size - 32; // Start temps below named locals and some buffer
+    current_temp_offset = -locals_size - 64; // Start temps below named locals and a larger 64-byte buffer for 64-bit saved registers
     param_idx = 0;
 }
 
 /* Look up offset for a variable via symbol table first, then a local cache. */
 /* Look up offset for a variable via symbol table first, then a local cache.
- * We add -32 to locals from the symbol table to skip the saved register area (ra, s0, s1-s4).
+ * We add -64 to locals from the symbol table to skip the saved register area (ra, s0, s1-s11) on RV64.
  */
 static int get_offset(const char *name) {
     /* 1. Check Register Allocator SPILLS or TEMPS */
@@ -60,8 +60,8 @@ static int get_offset(const char *name) {
                 if (cur_ra->callee_used[i]) callee_saves_count++;
             }
         }
-        int saved_regs_size = 8 + (callee_saves_count * 4);
-        /* sym->frame_offset is negative (e.g., -4, -8). 
+        int saved_regs_size = 16 + (callee_saves_count * 8);
+        /* sym->frame_offset is negative (e.g., -4, -8).
            We place it below the saved registers area. */
         return sym->frame_offset - saved_regs_size;
     }
@@ -178,22 +178,22 @@ static void load_address(FILE *out, IROperand op, const char *dst_reg) {
 /* Emit callee-saved register saves into the frame. */
 static void emit_callee_saves(FILE *out, RegAllocResult *ra, int frame_size) {
     if (!ra) return;
-    int slot = frame_size - 12; /* ra at -4, s0 at -8 */
+    int slot = frame_size - 24; /* ra at -8, s0 at -16, callee-saves start at -24 */
     for (int i = RA_FIRST_CALLEE_SAVED; i < RA_NUM_REGS; i++) {
         if (ra->callee_used[i]) {
-            fprintf(out, "  sw %s, %d(sp)\n", RA_REG_NAMES[i], slot);
-            slot -= 4;
+            fprintf(out, "  sd %s, %d(sp)\n", RA_REG_NAMES[i], slot);
+            slot -= 8;
         }
     }
 }
 
 static void emit_callee_restores(FILE *out, RegAllocResult *ra, int frame_size) {
     if (!ra) return;
-    int slot = frame_size - 12;
+    int slot = frame_size - 24;
     for (int i = RA_FIRST_CALLEE_SAVED; i < RA_NUM_REGS; i++) {
         if (ra->callee_used[i]) {
-            fprintf(out, "  lw %s, %d(sp)\n", RA_REG_NAMES[i], slot);
-            slot -= 4;
+            fprintf(out, "  ld %s, %d(sp)\n", RA_REG_NAMES[i], slot);
+            slot -= 8;
         }
     }
 }
@@ -211,7 +211,7 @@ static int calculate_frame_size(IRFunc *func, RegAllocResult *ra) {
     }
 
     /* Standard fixed frame part */
-    int saved_regs_size = 8 + (callee_saves_count * 4);
+    int saved_regs_size = 16 + (callee_saves_count * 8);
     int max_fixed_offset = saved_regs_size + locals_size;
 
     /* Scan allocator spills for even deeper offsets */
@@ -227,6 +227,19 @@ static int calculate_frame_size(IRFunc *func, RegAllocResult *ra) {
     /* Ensure we cover the fallback temp area if any were assigned (conservative) */
     /* Align to 16 bytes for RISC-V ABI compliance */
     return (max_fixed_offset + 31) & ~15;
+}
+
+/* Check if a function has any tail calls */
+static int has_tail_calls(IRFunc *func) {
+    if (!func || !func->instrs) return 0;
+    IRInstr *instr = func->instrs;
+    while (instr) {
+        if ((instr->kind == IR_CALL || instr->kind == IR_CALL_INDIRECT) && instr->is_tail_call) {
+            return 1;
+        }
+        instr = instr->next;
+    }
+    return 0;
 }
 
 /* -----------------------------------------------------------------------
@@ -251,6 +264,24 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
         fprintf(out, "  .text\n\n");
     }
 
+    /* Emit vtables */
+    int vtable_count = 0;
+    Symbol **vtables = get_all_structs_with_vtables(&vtable_count);
+    if (vtable_count > 0) {
+        fprintf(out, "  .data\n");
+        for (int i = 0; i < vtable_count; i++) {
+            Symbol *struct_sym = vtables[i];
+            fprintf(out, "vtable_%s:\n", struct_sym->name);
+            Symbol *m = struct_sym->virtual_methods;
+            while (m) {
+                fprintf(out, "  .dword %s\n", m->name);
+                m = m->next_member;
+            }
+        }
+        fprintf(out, "  .text\n\n");
+    }
+    if (vtables) free(vtables);
+
     IRFunc *func = prog->funcs;
     int func_idx = 0;
 
@@ -270,16 +301,18 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
         /* --- PROLOGUE --- */
         fprintf(out, "  # --- Prologue (Frame Size: %d) ---\n", frame_size);
         fprintf(out, "  addi sp, sp, -%d\n", frame_size);
-        fprintf(out, "  sw ra, %d(sp)\n", frame_size - 4);
-        fprintf(out, "  sw s0, %d(sp)\n", frame_size - 8);
+        fprintf(out, "  sd ra, %d(sp)\n", frame_size - 8);
+        fprintf(out, "  sd s0, %d(sp)\n", frame_size - 16);
         emit_callee_saves(out, cur_ra, frame_size);
         fprintf(out, "  addi s0, sp, %d\n\n", frame_size);
 
-        /* --- Tail recursion entry point --- */
+        /* --- Tail recursion entry point (only if function has tail calls) --- */
         char tail_entry_label[128];
         snprintf(tail_entry_label, sizeof(tail_entry_label), "%s_tail_entry", func->name);
-        fprintf(out, "  # Tail recursion entry point\n");
-        fprintf(out, "%s:\n\n", tail_entry_label);
+        if (has_tail_calls(func)) {
+            fprintf(out, "  # Tail recursion entry point\n");
+            fprintf(out, "%s:\n\n", tail_entry_label);
+        }
 
         /* --- Move parameters from a0-a7 to assigned locations --- */
         if (fsym && fsym->kind == SYM_FUNCTION) {
@@ -374,7 +407,10 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                     if (instr->scale > 1)
                         fprintf(out, "  li t4, %d\n  mul t1, t1, t4\n", instr->scale);
                     fprintf(out, "  add t2, t0, t1\n");
-                    fprintf(out, "  lw t2, 0(t2)\n");
+                    if (instr->scale == 8)
+                        fprintf(out, "  ld t2, 0(t2)\n");
+                    else
+                        fprintf(out, "  lw t2, 0(t2)\n");
                     store_result(out, instr->result, "t2");
                     break;
 
@@ -397,7 +433,10 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                         fprintf(out, "  li t4, %d\n  mul t1, t1, t4\n", instr->scale);
                     load_operand(out, instr->store_val, "t2");
                     fprintf(out, "  add t3, t0, t1\n");
-                    fprintf(out, "  sw t2, 0(t3)\n");
+                    if (instr->scale == 8)
+                        fprintf(out, "  sd t2, 0(t3)\n");
+                    else
+                        fprintf(out, "  sw t2, 0(t3)\n");
                     break;
 
                 case IR_PARAM:
@@ -421,8 +460,8 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                         fprintf(out, "  # Tail call to another function: unwind current frame\n");
                         fprintf(out, "  addi sp, s0, -%d\n", frame_size);
                         emit_callee_restores(out, cur_ra, frame_size);
-                        fprintf(out, "  lw ra, %d(sp)\n", frame_size - 4);
-                        fprintf(out, "  lw s0, %d(sp)\n", frame_size - 8);
+                        fprintf(out, "  ld ra, %d(sp)\n", frame_size - 8);
+                        fprintf(out, "  ld s0, %d(sp)\n", frame_size - 16);
                         fprintf(out, "  addi sp, sp, %d\n", frame_size);
                         fprintf(out, "  j %s\n", instr->call_fn);
                         param_idx = 0;
@@ -457,8 +496,8 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
                     /* Re-adjust sp to fixed frame start in case of VLA */
                     fprintf(out, "  addi sp, s0, -%d\n", frame_size);
                     emit_callee_restores(out, cur_ra, frame_size);
-                    fprintf(out, "  lw ra, %d(sp)\n", frame_size - 4);
-                    fprintf(out, "  lw s0, %d(sp)\n", frame_size - 8);
+                    fprintf(out, "  ld ra, %d(sp)\n", frame_size - 8);
+                    fprintf(out, "  ld s0, %d(sp)\n", frame_size - 16);
                     fprintf(out, "  addi sp, sp, %d\n", frame_size);
                     fprintf(out, "  jr ra\n");
                     break;
@@ -474,8 +513,8 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
         fprintf(out, "\n  # --- Default Epilogue ---\n");
         fprintf(out, "  addi sp, s0, -%d\n", frame_size);
         emit_callee_restores(out, cur_ra, frame_size);
-        fprintf(out, "  lw ra, %d(sp)\n", frame_size - 4);
-        fprintf(out, "  lw s0, %d(sp)\n", frame_size - 8);
+        fprintf(out, "  ld ra, %d(sp)\n", frame_size - 8);
+        fprintf(out, "  ld s0, %d(sp)\n", frame_size - 16);
         fprintf(out, "  addi sp, sp, %d\n", frame_size);
         fprintf(out, "  jr ra\n\n");
 

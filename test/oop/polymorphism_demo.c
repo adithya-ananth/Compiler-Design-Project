@@ -1,14 +1,14 @@
 class Base {
 public:
     virtual void show() {
-        //cout << "Base class\n";
+        printf("Base class\n");
     }
 };
 
 class Derived : Base {
 public:
     void show(){
-        //cout << "Derived class\n";
+        printf("Derived class\n");
     }
 };
 

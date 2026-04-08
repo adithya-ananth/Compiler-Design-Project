@@ -1003,7 +1003,7 @@ static void merge_trivial_blocks(CFG *cfg) {
         while (bb) {
             if (bb->succ_count == 1) {
                 BasicBlock *succ = bb->succs[0];
-                if (succ->pred_count == 1 && succ != bb && succ != cfg->entry) {
+                if (succ->pred_count == 1 && succ != bb && succ != cfg->entry && succ == bb->next) {
                     if (bb->last && bb->last->kind == IR_GOTO) {
                         IRInstr *p = bb->instrs, *prev = NULL;
                         while(p && p != bb->last) { prev = p; p = p->next; }

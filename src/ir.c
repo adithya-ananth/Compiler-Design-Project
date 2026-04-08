@@ -29,7 +29,7 @@ char* ir_new_label(void) {
 
 void ir_reset_temps(void) {
     temp_counter = 0;
-    label_counter = 0;
+    // label_counter = 0;  // Don't reset to keep labels unique across functions
     string_counter = 0;
 }
 

@@ -3,6 +3,7 @@ class Calculator {
     int x;
     public:
     Calculator(){
+        printf("Calculator created\n");
         x = 8;
     }
     int add(int x, int y) {

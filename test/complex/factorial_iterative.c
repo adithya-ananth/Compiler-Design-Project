@@ -1,5 +1,7 @@
 int main() {
-    int n = 7;
+    int n;
+    printf("Enter a positive integer: ");
+    scanf("%d", &n);
     int result = 1;
     int i = 1;
 

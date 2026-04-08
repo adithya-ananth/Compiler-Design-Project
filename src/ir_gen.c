@@ -483,7 +483,7 @@ static IROperand gen_expr(ASTNode *node, IRInstr **list) {
                 
                 int idx = node->func_sym ? node->func_sym->vtable_index : 0;
                 char *func_temp = ir_new_temp();
-                ir_append(list, ir_make_load(func_temp, ir_op_name(vtable_temp), ir_op_const(idx), 4, line));
+                ir_append(list, ir_make_load(func_temp, ir_op_name(vtable_temp), ir_op_const(idx), 8, line));
                 
                 func_ptr_op = ir_op_name(func_temp);
                 free(vtable_temp);
@@ -763,7 +763,7 @@ static void gen_stmt(ASTNode *node, IRInstr **list) {
                 snprintf(vtable_name, sizeof(vtable_name), "vtable_%s", sym->struct_def->name);
                 IROperand vtable_op = ir_op_name(vtable_name);
                 IROperand base = ir_op_name(node->str_val);
-                ir_append(list, ir_make_store(base, ir_op_const(0), 4, vtable_op, line));
+                ir_append(list, ir_make_store(base, ir_op_const(0), 8, vtable_op, line));
                 if (vtable_op.name) free(vtable_op.name);
                 if (base.name) free(base.name);
             }
@@ -856,6 +856,23 @@ static void gen_func(ASTNode *node, IRProgram *prog) {
     ir_reset_temps();
 
     gen_stmt(node->body, &f->instrs);
+
+    /* Add implicit return if the function doesn't end with a return statement */
+    if (f->instrs) {
+        IRInstr *last = f->instrs;
+        while (last->next) last = last->next;
+        
+        /* Check if the last instruction is a return */
+        if (last->kind != IR_RETURN) {
+            if (ret_type == TYPE_VOID) {
+                ir_append(&f->instrs, ir_make_return(node->line_number));
+            } else {
+                /* For non-void functions without explicit return, append return 0 */
+                IROperand zero = ir_op_const(0);
+                ir_append(&f->instrs, ir_make_return_val(zero, node->line_number));
+            }
+        }
+    }
 
     ir_program_add_func(prog, f);
 }

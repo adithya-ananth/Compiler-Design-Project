@@ -1,17 +1,23 @@
 int main() {
     int n;
-    printf("Enter the size of the array: ");
+    // get size of array
+    printf("Enter size of array: ");
     scanf("%d", &n);
-    n = n + 1;
     int a[n];
     int i;
-    for (i = 0; i < n; i = i + 1) {
-        a[i] = i * i;
+    for (i = 0; i < n; i=i+1) {
+        a[i] = (i+1) * (i+1);
     }
+    printf("Array contents:\n");
+    for (i = 0; i < n; i=i+1) {
+        printf("%d ", a[i]);
+    }
+    printf("\n");
+    // the sum of the array
     int sum = 0;
-    for (i = 0; i < n; i = i + 1) {
+    for (i = 0; i < n; i=i+1) {
         sum = sum + a[i];
     }
-    printf("The sum is %d\n", sum);
-    return sum; // Expected: 0+1+4+9+16 = 30
+    printf("Sum of array: %d\n", sum);
+    return 0;
 }

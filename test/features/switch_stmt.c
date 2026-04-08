@@ -35,7 +35,7 @@ int classify_char(char c) {
             break;
 
         default:
-            r = -1;
+            r = -2;
             break;
     }
 
@@ -49,6 +49,12 @@ int main() {
     int v4 = classify_char('z');
 
     /* Just combine to make the value depend on all switches */
-    return v1 + v2 + v3 + v4;
+    int v5 = v1 + v2 + v3 + v4;
+    printf("v1 = %d\n", v1); // expected: 200
+    printf("v2 = %d\n", v2); // expected: 201 
+    printf("v3 = %d\n", v3); // expected: 1
+    printf("v4 = %d\n", v4); // expected: -1
+    printf("v5 = %d\n", v5); // expected: 202 (200 + 1 + 1 + -1)
+    return 0;
 }
 

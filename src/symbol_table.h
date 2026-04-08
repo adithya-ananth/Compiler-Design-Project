@@ -100,6 +100,7 @@ typedef struct Scope {
 } Scope;
 
 extern Scope *current_scope;
+extern Scope *all_scopes;
 
 unsigned int hash(char *key);
 void enter_scope();
@@ -118,5 +119,7 @@ const char* data_type_to_string(DataType type);
 const char* symbol_kind_to_string(SymbolKind kind);
 void print_scope(Scope *scope);
 void print_symbol_table();
+
+Symbol** get_all_structs_with_vtables(int *count);
 
 #endif  // SYMBOL_TABLE_H
