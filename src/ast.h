@@ -33,7 +33,11 @@ typedef enum {
     NODE_STRUCT_DEF,   /* struct definition */
     NODE_ACCESS_SPEC,  /* access specifier */
     NODE_PRINTF,
-    NODE_SCANF
+    NODE_SCANF,
+    NODE_PRE_INC,
+    NODE_PRE_DEC,
+    NODE_POST_INC,
+    NODE_POST_DEC
 } NodeType;
 
 typedef struct ASTNode {
@@ -84,9 +88,12 @@ typedef struct ASTNode {
     char *base_class_name;
     // For access modifiers inside structs/classes (0=public, 1=private, 2=protected)
     int access_modifier;
+    // New: inheritance access (0=public, 1=private)
+    int inheritance_modifier;
     // New: constructor and destructor flags
     int is_constructor;
     int is_destructor;
+    struct Symbol *sym;    // Resolved symbol for variables
 } ASTNode;
 
 

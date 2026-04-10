@@ -1,17 +1,87 @@
 function main:
-  param 3
-  call fun, 1
+  t0 := &s$17
+  param t0
+  call Stack__ctor, 1
+  t1 := &s$17
+  param t1
+  param 10
+  t2 := call Stack_push_int, 2
+  t3 := &s$17
+  param t3
+  param 20
+  t4 := call Stack_push_int, 2
+  t5 := &s$17
+  param t5
+  param 30
+  t6 := call Stack_push_int, 2
+  t7 := &s$17
+  param t7
+  t8 := call Stack_pop, 1
+  param .LC4
+  param t8
+  call printf, 2
+  param .LC5
+  t9 := &s$17
+  param t9
+  t10 := call Stack_peek, 1
+  param t10
+  call printf, 2
   return 0
 
-function fun:
-  if n <= 0 goto L2
+function Stack_isEmpty:
+  t0 := load this$15[100] (scale 4)
+  t1 := 0
+  if t0 >= 0 goto L10
+L9:
+  t1 := 1
+L10:
+  return t1
+
+function Stack_peek:
+  t0 := load this$13[100] (scale 4)
+  if t0 >= 0 goto L7
+L6:
+  param .LC3
+  call printf, 1
+  return 0
+L7:
+  t1 := load this$13[100] (scale 4)
+  t3 := load this$13[t1] (scale 4)
+  return t3
+
+function Stack_pop:
+  t0 := load this$10[100] (scale 4)
+  if t0 >= 0 goto L4
+L3:
+  param .LC2
+  call printf, 1
+  return 0
+L4:
+  t1 := load this$10[100] (scale 4)
+  t2 := t1 - 1
+  store this$10[100] (scale 4) := t2
+  t4 := load this$10[t1] (scale 4)
+  return t4
+
+function Stack_push_int:
+  t0 := load this$7[100] (scale 4)
+  t1 := MAX$0 - 1
+  if t0 < t1 goto L1
 L0:
   param .LC0
-  param n
+  call printf, 1
+  return 0
+L1:
+  t2 := load this$7[100] (scale 4)
+  t3 := t2 + 1
+  store this$7[100] (scale 4) := t3
+  store this$7[t3] (scale 4) := x$8
+  param .LC1
+  param x$8
   call printf, 2
-  t0 := n - 1
-  param t0
-  call fun, 1
-L2:
+  return 1
+
+function Stack__ctor:
+  store this$5[100] (scale 4) := -1
   return
 

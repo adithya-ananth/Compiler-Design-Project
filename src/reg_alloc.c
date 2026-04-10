@@ -95,15 +95,22 @@ static void ig_free(InterferenceGraph *ig) {
  * or a named source variable.  Both kinds go through the allocator.
  * We skip global/struct/vtable names.
  * ----------------------------------------------------------------------- */
-static int is_allocatable(const char *name) {
+static int is_allocatable(const char *name, Scope *scope) {
     if (!name) return 0;
     /* Skip vtable references */
     if (strncmp(name, "vtable_", 7) == 0) return 0;
     /* Skip empty string */
     if (name[0] == '\0') return 0;
-    
+
+    Symbol *sym = NULL;
+    if (scope) {
+        sym = lookup_in_scope(scope, name);
+    }
+    if (!sym) {
+        sym = lookup_all_scopes(name);
+    }
+
     /* Skip variables whose address is taken (must stay on stack for correctness) */
-    Symbol *sym = lookup((char *)name);
     if (sym && sym->is_address_taken) return 0;
 
     return 1;
@@ -124,13 +131,18 @@ static InterferenceGraph *build_interference_graph(IRFunc *f, CFG *cfg) {
     /* Ensure liveness info is up to date */
     compute_liveness(cfg);
 
+
     /* --- Parameters interfere with each other at function entry --- */
     Symbol *fsym = lookup(f->name);
     if (fsym && fsym->kind == SYM_FUNCTION) {
         for (int i = 0; i < fsym->param_count; i++) {
+            Symbol *p_i = lookup_in_scope(fsym->scope, fsym->param_names[i]);
+            const char *iname_i = p_i ? p_i->ir_name : fsym->param_names[i];
             for (int j = i + 1; j < fsym->param_count; j++) {
-                int u = ig_get_or_add(ig, fsym->param_names[i]);
-                int v = ig_get_or_add(ig, fsym->param_names[j]);
+                Symbol *p_j = lookup_in_scope(fsym->scope, fsym->param_names[j]);
+                const char *iname_j = p_j ? p_j->ir_name : fsym->param_names[j];
+                int u = ig_get_or_add(ig, iname_i);
+                int v = ig_get_or_add(ig, iname_j);
                 ig_add_edge(ig, u, v);
             }
         }
@@ -164,7 +176,7 @@ static InterferenceGraph *build_interference_graph(IRFunc *f, CFG *cfg) {
 
         /* Copy live_out into our working live set */
         for (int i = 0; i < bb->live_out_count; i++) {
-            if (!is_allocatable(bb->live_out[i])) continue;
+            if (!is_allocatable(bb->live_out[i], fsym ? fsym->scope : NULL)) continue;
             /* Ensure node exists */
             ig_get_or_add(ig, bb->live_out[i]);
             /* Add to live set */
@@ -176,8 +188,10 @@ static InterferenceGraph *build_interference_graph(IRFunc *f, CFG *cfg) {
         for (int i = cnt - 1; i >= 0; i--) {
             IRInstr *instr = arr[i];
 
+
+
             /* --- Add interference edges at the definition point --- */
-            if (instr->result && is_allocatable(instr->result)) {
+            if (instr->result && is_allocatable(instr->result, fsym ? fsym->scope : NULL)) {
                 int def_idx = ig_get_or_add(ig, instr->result);
                 for (int j = 0; j < live_count; j++) {
                     if (strcmp(live[j], instr->result) == 0) continue;
@@ -216,7 +230,7 @@ static InterferenceGraph *build_interference_graph(IRFunc *f, CFG *cfg) {
             }
             for (int j = 0; j < nops; j++) {
                 if (!ops[j] || ops[j]->is_const || !ops[j]->name) continue;
-                if (!is_allocatable(ops[j]->name)) continue;
+                if (!is_allocatable(ops[j]->name, fsym ? fsym->scope : NULL)) continue;
                 ig_get_or_add(ig, ops[j]->name);
                 /* Add to live set if not already present */
                 int found = 0;
@@ -352,7 +366,7 @@ static int select_colors(InterferenceGraph *ig,
             /* Actual spill */
             ig->nodes[idx].color   = -1;
             ig->nodes[idx].spilled  = 1;
-            *spill_offset_counter  -= 4;
+            *spill_offset_counter  -= 8; /* Use 8-byte spill slots for 64-bit pointers/values */
             ig->nodes[idx].spill_offset = *spill_offset_counter;
             spill_count++;
         }

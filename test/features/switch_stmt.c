@@ -53,8 +53,8 @@ int main() {
     printf("v1 = %d\n", v1); // expected: 200
     printf("v2 = %d\n", v2); // expected: 201 
     printf("v3 = %d\n", v3); // expected: 1
-    printf("v4 = %d\n", v4); // expected: -1
-    printf("v5 = %d\n", v5); // expected: 202 (200 + 1 + 1 + -1)
+    printf("v4 = %d\n", v4); // expected: -2
+    printf("v5 = %d\n", v5); // expected: 202 (200 + 1 + 1 + -2)
     return 0;
 }
 

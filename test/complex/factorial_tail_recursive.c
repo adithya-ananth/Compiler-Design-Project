@@ -2,6 +2,7 @@ int fact_tail(int n, int accumulator) {
     if (n <= 1) {
         return accumulator;
     }
+    //printf("n = %d, accumulator = %d\n", n, accumulator);
     // Tail recursion: The function call is the ABSOLUTE LAST operation.
     // The optimizer will flag this, destroy the stack frame early, and use a 'jump' 
     // instead of a 'call', running in O(1) memory instead of O(n).
@@ -9,7 +10,10 @@ int fact_tail(int n, int accumulator) {
 }
 
 int main() {
-    int result = fact_tail(7, 1);
+    printf("Enter a positive integer: ");
+    int n;
+    scanf("%d", &n);
+    int result = fact_tail(n, 1);
     printf("Tail-Recursive Factorial is %d\n", result);
     return 0;
 }

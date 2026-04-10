@@ -7,7 +7,7 @@ Scope *current_scope = NULL;
 
 Scope *all_scopes = NULL;
 
-unsigned int hash(char *key) {
+unsigned int hash(const char *key) {
     unsigned int h = 0;
     while (*key)
         h = (h << 4) + *key++;
@@ -101,9 +101,13 @@ Symbol *create_symbol(char *name, DataType type,
     sym->param_is_array = NULL;
     sym->next = NULL;
     sym->next_member = NULL;
+    sym->scope = NULL;
     sym->vtable_index = -1;
     sym->is_address_taken = 0;
 
+    static int symbol_id_counter = 0;
+    snprintf(sym->ir_name, sizeof(sym->ir_name), "%s$%d", name, symbol_id_counter++);
+    
     return sym;
 }
 
@@ -127,28 +131,122 @@ int insert_symbol(Symbol *sym) {
     return 1; // success
 }
 
-Symbol *lookup_current(char *name) {
+Symbol *lookup_current(const char *name) {
     if(!current_scope) return NULL;
     unsigned int index = hash(name);
     Symbol *sym = current_scope->table[index];
 
     while (sym) {
-        if (strcmp(sym->name, name) == 0)
+        if (strcmp(sym->name, name) == 0 || strcmp(sym->ir_name, name) == 0)
             return sym;
         sym = sym->next;
+    }
+
+    /* Fallback: if name is an ir_name (contains $), hash the base name */
+    const char *sep = strchr(name, '$');
+    if (sep) {
+        char base[256];
+        int len = sep - name;
+        if (len >= 256) len = 255;
+        strncpy(base, name, len);
+        base[len] = '\0';
+        unsigned int b_index = hash(base);
+        sym = current_scope->table[b_index];
+        while (sym) {
+            if (strcmp(sym->ir_name, name) == 0)
+                return sym;
+            sym = sym->next;
+        }
     }
     return NULL;
 }
 
-Symbol *lookup(char *name) {
+Symbol *lookup_in_scope(Scope *scope, const char *name) {
+    while (scope) {
+        unsigned int index = hash(name);
+        Symbol *sym = scope->table[index];
+        while (sym) {
+            if (strcmp(sym->name, name) == 0 || strcmp(sym->ir_name, name) == 0)
+                return sym;
+            sym = sym->next;
+        }
+        /* Fallback: if name is an ir_name (contains $), hash the base name */
+        const char *sep = strchr(name, '$');
+        if (sep) {
+            char base[256];
+            int len = sep - name;
+            if (len >= 256) len = 255;
+            strncpy(base, name, len);
+            base[len] = '\0';
+            unsigned int b_index = hash(base);
+            sym = scope->table[b_index];
+            while (sym) {
+                if (strcmp(sym->ir_name, name) == 0)
+                    return sym;
+                sym = sym->next;
+            }
+        }
+        scope = scope->parent;
+    }
+    return NULL;
+}
+
+Symbol *lookup(const char *name) {
+    Scope *scope = current_scope;
+    while (scope) {
+        unsigned int index = hash(name);
+        Symbol *sym = scope->table[index];
+        while (sym) {
+            if (strcmp(sym->name, name) == 0 || strcmp(sym->ir_name, name) == 0)
+                return sym;
+            sym = sym->next;
+        }
+        /* Fallback: if name is an ir_name (contains $), hash the base name */
+        const char *sep = strchr(name, '$');
+        if (sep) {
+            char base[256];
+            int len = sep - name;
+            if (len >= 256) len = 255;
+            strncpy(base, name, len);
+            base[len] = '\0';
+            unsigned int b_index = hash(base);
+            sym = scope->table[b_index];
+            while (sym) {
+                if (strcmp(sym->ir_name, name) == 0)
+                    return sym;
+                sym = sym->next;
+            }
+        }
+        scope = scope->parent;
+    }
+    return NULL;
+}
+
+Symbol *lookup_all_scopes(const char *name) {
     Scope *scope = all_scopes;
     while (scope) {
         unsigned int index = hash(name);
         Symbol *sym = scope->table[index];
         while (sym) {
-            if (strcmp(sym->name, name) == 0)
+            if (strcmp(sym->name, name) == 0 || strcmp(sym->ir_name, name) == 0)
                 return sym;
             sym = sym->next;
+        }
+        /* Fallback: if name is an ir_name (contains $), hash the base name */
+        const char *sep = strchr(name, '$');
+        if (sep) {
+            char base[256];
+            int len = sep - name;
+            if (len >= 256) len = 255;
+            strncpy(base, name, len);
+            base[len] = '\0';
+            unsigned int b_index = hash(base);
+            sym = scope->table[b_index];
+            while (sym) {
+                if (strcmp(sym->ir_name, name) == 0)
+                    return sym;
+                sym = sym->next;
+            }
         }
         scope = scope->next_scope;
     }

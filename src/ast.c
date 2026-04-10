@@ -36,6 +36,10 @@ const char* node_type_to_string(NodeType type) {
         case NODE_ACCESS_SPEC: return "ACCESS_SPEC";
         case NODE_PRINTF: return "PRINTF";
         case NODE_SCANF: return "SCANF";
+        case NODE_PRE_INC: return "PRE_INC";
+        case NODE_PRE_DEC: return "PRE_DEC";
+        case NODE_POST_INC: return "POST_INC";
+        case NODE_POST_DEC: return "POST_DEC";
         default: return "UNKNOWN";
     }
 }
@@ -62,6 +66,8 @@ const char* get_op_string(int op) {
         case T_GE:  return ">=";
         case T_AND: return "&&";
         case T_OR:  return "||";
+        case T_INC: return "++";
+        case T_DEC: return "--";
 
         default: return "UNKNOWN_OP";
     }
@@ -558,6 +564,22 @@ void print_ast(ASTNode *node, int level) {
             print_ast(node->left, level + 2);
             print_indent(level + 1); printf("Args:\n");
             print_ast(node->right, level + 2);
+            break;
+        case NODE_PRE_INC:
+            printf("PreInc\n");
+            print_ast(node->left, level + 1);
+            break;
+        case NODE_PRE_DEC:
+            printf("PreDec\n");
+            print_ast(node->left, level + 1);
+            break;
+        case NODE_POST_INC:
+            printf("PostInc\n");
+            print_ast(node->left, level + 1);
+            break;
+        case NODE_POST_DEC:
+            printf("PostDec\n");
+            print_ast(node->left, level + 1);
             break;
         default:
             printf("Unknown Node\n");

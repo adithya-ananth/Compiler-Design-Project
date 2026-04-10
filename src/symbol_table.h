@@ -88,8 +88,14 @@ typedef struct Symbol {
     // Address-taken flag for register allocation
     int is_address_taken;
 
+    // For variables initialized with a constant expression
+    int const_value;
+    int has_const_value;
+
     struct Symbol *next;          // hash chaining
     struct Symbol *next_member;   // linked list for struct/class members
+    struct Scope *scope;          // pointer to owning scope for function symbols
+    char ir_name[128];            // Unique name for IR generation
 } Symbol;
 
 typedef struct Scope {
@@ -102,7 +108,7 @@ typedef struct Scope {
 extern Scope *current_scope;
 extern Scope *all_scopes;
 
-unsigned int hash(char *key);
+unsigned int hash(const char *key);
 void enter_scope();
 void init_symbol_table();
 void exit_scope();
@@ -110,9 +116,13 @@ void free_symbol_list(Symbol *sym);
 Symbol *create_symbol(char *name, DataType type, SymbolKind kind, int line);
 int insert_symbol(Symbol *sym);
 //to lookup the current scope only
-Symbol *lookup_current(char *name);
+Symbol *lookup_current(const char *name);
 //lookup all the parent scopes
-Symbol *lookup(char *name);
+Symbol *lookup(const char *name);
+//lookup within a specific scope chain
+Symbol *lookup_in_scope(Scope *scope, const char *name);
+//lookup all scopes regardless of current scope state
+Symbol *lookup_all_scopes(const char *name);
 
 //functions to help print the symbol table
 const char* data_type_to_string(DataType type);

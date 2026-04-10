@@ -143,6 +143,7 @@ IRInstr* ir_make_alloca(char *dst, IROperand size, int line);
 /* --- Operand helpers --- */
 IROperand ir_op_name(char *name);
 IROperand ir_op_const(int val);
+IROperand ir_op_copy(IROperand *op);
 
 /* --- List management --- */
 void ir_append(IRInstr **head, IRInstr *instr);

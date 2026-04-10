@@ -28,6 +28,18 @@ IR is printed to stdout and exported to `ir.txt`. Run validation:
 ./run_tests.sh
 ```
 
+Run QEMU-backed regression tests:
+
+```bash
+./scripts/run_qemu_tests.sh
+```
+
+Compile and run a single C test with QEMU via the helper pipeline:
+
+```bash
+./scripts/qemu_run.sh test/complex/factorial_tail_recursive.c "7\n"
+```
+
 ## Meet the Team
 - Adithya Ananth (CS23B001)
 - Srikrishna Madhusudhanan (CS23B056)

@@ -62,7 +62,7 @@ ASTNode *root = NULL;
 %token <intval> T_ARROW T_TILDE
 
 /* Operators */
-%token T_EQ T_NEQ T_LE T_GE T_AND T_OR
+%token <intval> T_EQ T_NEQ T_LE T_GE T_AND T_OR T_INC T_DEC
 
 /* Precedence (lowest to highest) */
 %right '='
@@ -305,6 +305,26 @@ class_specifier
         node->is_class = 1;
         $$ = node;
     }
+    | T_CLASS T_IDENT T_COLON T_PUBLIC T_IDENT '{' struct_declaration_list '}' {
+        ASTNode *node = create_node(NODE_STRUCT_DEF);
+        SET_LINE(node);
+        node->str_val = strdup($2);
+        node->base_class_name = strdup($5);
+        node->body = $7;
+        node->is_class = 1;
+        node->inheritance_modifier = 0; /* public */
+        $$ = node;
+    }
+    | T_CLASS T_IDENT T_COLON T_PRIVATE T_IDENT '{' struct_declaration_list '}' {
+        ASTNode *node = create_node(NODE_STRUCT_DEF);
+        SET_LINE(node);
+        node->str_val = strdup($2);
+        node->base_class_name = strdup($5);
+        node->body = $7;
+        node->is_class = 1;
+        node->inheritance_modifier = 1; /* private */
+        $$ = node;
+    }
     | T_CLASS T_IDENT T_COLON T_IDENT '{' struct_declaration_list '}' {
         ASTNode *node = create_node(NODE_STRUCT_DEF);
         SET_LINE(node);
@@ -312,6 +332,7 @@ class_specifier
         node->base_class_name = strdup($4);
         node->body = $6;
         node->is_class = 1;
+        node->inheritance_modifier = 1; /* DEFAULT private for class */
         $$ = node;
     }
     | T_CLASS T_IDENT {
@@ -449,13 +470,15 @@ iteration_statement
         $$ = create_while_node($3, $5);
         SET_LINE($$);
     }
-    | T_FOR '(' expression_statement expression_statement ')' statement {
-        // For loop without increment
-        // Note: expression_statement includes the node, we might want to extract children or just link them
+    | T_FOR '(' expression_statement expression_statement expression ')' statement {
+        $$ = create_for_node($3, $4, $5, $7);
+        SET_LINE($$);
+    }
+    | T_FOR '(' declaration expression_statement ')' statement {
         $$ = create_for_node($3, $4, NULL, $6);
         SET_LINE($$);
     }
-    | T_FOR '(' expression_statement expression_statement expression ')' statement {
+    | T_FOR '(' declaration expression_statement expression ')' statement {
         $$ = create_for_node($3, $4, $5, $7);
         SET_LINE($$);
     }
@@ -655,6 +678,16 @@ postfix_expression
         }
         $$ = func;
     }
+    | postfix_expression T_INC {
+        $$ = create_unary_node(T_INC, $1);
+        $$->type = NODE_POST_INC;
+        SET_LINE($$);
+    }
+    | postfix_expression T_DEC {
+        $$ = create_unary_node(T_DEC, $1);
+        $$->type = NODE_POST_DEC;
+        SET_LINE($$);
+    }
     ;
 
 unary_expression
@@ -673,6 +706,16 @@ unary_expression
     }
     | '*' unary_expression {
         $$ = create_unary_node('*', $2);
+        SET_LINE($$);
+    }
+    | T_INC unary_expression {
+        $$ = create_unary_node(T_INC, $2);
+        $$->type = NODE_PRE_INC;
+        SET_LINE($$);
+    }
+    | T_DEC unary_expression {
+        $$ = create_unary_node(T_DEC, $2);
+        $$->type = NODE_PRE_DEC;
         SET_LINE($$);
     }
     ;

@@ -14,7 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "ir.h"
+#include "ast.h"
 #include "symbol_table.h"
+#include "semantic.h"
 #include "reg_alloc.h"
 #include "riscv_gen.h"
 
@@ -32,6 +34,7 @@ static int var_count = 0;
 static int current_temp_offset = 0;
 static int param_idx = 0;
 static RegAllocResult *cur_ra = NULL; /* NULL when running without allocator */
+static Scope *current_codegen_scope = NULL;
 
 static void reset_offsets(int locals_size) {
     var_count = 0;
@@ -51,8 +54,12 @@ static int get_offset(const char *name) {
     }
 
     /* 2. Check Symbol Table (for variables with address taken, etc.) */
-    Symbol *sym = lookup((char *)name);
+    Symbol *sym = lookup_in_scope(current_codegen_scope, name);
+    if (!sym) sym = lookup_all_scopes(name);
     if (sym && sym->kind != SYM_FUNCTION && sym->kind != SYM_STRUCT) {
+        if (sym->kind == SYM_PARAMETER) {
+            return sym->frame_offset;
+        }
         /* Find saved_regs_size to correctly offset locals from the frame pointer */
         int callee_saves_count = 0;
         if (cur_ra) {
@@ -71,7 +78,7 @@ static int get_offset(const char *name) {
         if (strcmp(var_offsets[i].name, name) == 0) return var_offsets[i].offset;
     }
     
-    current_temp_offset -= 4;
+    current_temp_offset -= 8;
     if (var_count < 256) {
         strncpy(var_offsets[var_count].name, name, 63);
         var_offsets[var_count].name[63] = '\0';
@@ -103,6 +110,16 @@ static const char *get_reg(const char *name) {
  *   3. Variable with register assigned → mv dst, phys_reg  (if dst != phys_reg)
  *   4. Variable spilled / not allocated → lw dst, offset(s0)
  * ----------------------------------------------------------------------- */
+static int get_operand_size(const char *name) {
+    if (!name) return 4;
+    Symbol *sym = lookup_in_scope(current_codegen_scope, name);
+    if (!sym) sym = lookup_all_scopes(name);
+    if (!sym) return 8; // Default to 8 bytes for temps and unknown symbols on 64-bit
+    if (sym->pointer_level > 0) return 8;
+    if (sym->is_array || sym->is_vla) return 8;
+    return get_type_size(sym->type, sym->pointer_level, sym->struct_def);
+}
+
 static void load_operand(FILE *out, IROperand op, const char *dst_reg) {
     if (op.is_const) {
         fprintf(out, "  li %s, %d\n", dst_reg, op.const_val);
@@ -123,7 +140,11 @@ static void load_operand(FILE *out, IROperand op, const char *dst_reg) {
         /* else: already in the right register — nothing to emit */
     } else {
         /* Spilled or stack variable */
-        fprintf(out, "  lw %s, %d(s0)\n", dst_reg, get_offset(op.name));
+        int size = get_operand_size(op.name);
+        if (size == 8)
+            fprintf(out, "  ld %s, %d(s0)\n", dst_reg, get_offset(op.name));
+        else
+            fprintf(out, "  lw %s, %d(s0)\n", dst_reg, get_offset(op.name));
     }
 }
 
@@ -131,7 +152,7 @@ static void load_operand(FILE *out, IROperand op, const char *dst_reg) {
  * Store a result (already computed in src_reg) to its destination.
  *
  * If the result variable has a physical register, emit mv dest_phys, src_reg.
- * If spilled, emit sw src_reg, offset(s0).
+ * If spilled, emit sw or sd src_reg, offset(s0).
  */
 static void store_result(FILE *out, const char *result_name, const char *src_reg) {
     if (!result_name) return;
@@ -141,7 +162,11 @@ static void store_result(FILE *out, const char *result_name, const char *src_reg
         if (strcmp(phys, src_reg) != 0)
             fprintf(out, "  mv %s, %s\n", phys, src_reg);
     } else {
-        fprintf(out, "  sw %s, %d(s0)\n", src_reg, get_offset(result_name));
+        int size = get_operand_size(result_name);
+        if (size == 8)
+            fprintf(out, "  sd %s, %d(s0)\n", src_reg, get_offset(result_name));
+        else
+            fprintf(out, "  sw %s, %d(s0)\n", src_reg, get_offset(result_name));
     }
 }
 
@@ -153,7 +178,8 @@ static void load_address(FILE *out, IROperand op, const char *dst_reg) {
         fprintf(out, "  la %s, %s\n", dst_reg, op.name);
         return;
     }
-    Symbol *sym = lookup((char *)op.name);
+    Symbol *sym = lookup_in_scope(current_codegen_scope, op.name);
+    if (!sym) sym = lookup_all_scopes(op.name);
     int off = get_offset(op.name);
 
     /* Pointers, parameters, and VLAs hold addresses; locals/arrays are addresses */
@@ -164,8 +190,14 @@ static void load_address(FILE *out, IROperand op, const char *dst_reg) {
             if (strcmp(phys, dst_reg) != 0)
                 fprintf(out, "  mv %s, %s\n", dst_reg, phys);
         } else {
-            fprintf(out, "  lw %s, %d(s0)\n", dst_reg, off);
+            int size = get_operand_size(op.name);
+            if (size == 8)
+                fprintf(out, "  ld %s, %d(s0)\n", dst_reg, off);
+            else
+                fprintf(out, "  lw %s, %d(s0)\n", dst_reg, off);
         }
+    } else if (!sym && get_reg(op.name)) {
+        fprintf(out, "  mv %s, %s\n", dst_reg, get_reg(op.name));
     } else {
         fprintf(out, "  addi %s, s0, %d\n", dst_reg, off);
     }
@@ -225,6 +257,8 @@ static int calculate_frame_size(IRFunc *func, RegAllocResult *ra) {
     }
 
     /* Ensure we cover the fallback temp area if any were assigned (conservative) */
+    if (-current_temp_offset > max_fixed_offset) max_fixed_offset = -current_temp_offset;
+    
     /* Align to 16 bytes for RISC-V ABI compliance */
     return (max_fixed_offset + 31) & ~15;
 }
@@ -293,6 +327,7 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
 
         /* Select the per-function register allocation result (if available) */
         cur_ra = (ra_results && ra_results[func_idx]) ? ra_results[func_idx] : NULL;
+        current_codegen_scope = fsym ? fsym->scope : NULL;
 
         int frame_size = calculate_frame_size(func, cur_ra);
 
@@ -319,8 +354,18 @@ void riscv_generate(IRProgram *prog, RegAllocResult **ra_results, const char *fi
             for (int i = 0; i < fsym->param_count && i < 8; i++) {
                 char arg_reg[4];
                 snprintf(arg_reg, sizeof(arg_reg), "a%d", i);
-                const char *var_name = fsym->param_names[i];
+                const char *orig_name = fsym->param_names[i];
+                Symbol *p_sym = lookup_in_scope(current_codegen_scope, orig_name);
+                if (!p_sym) p_sym = lookup_all_scopes(orig_name);
+                
+                /* If we found a symbol but its name is not what we expected, 
+                   try looking up the ir_name directly in reg_alloc results */
+                const char *var_name = p_sym ? p_sym->ir_name : orig_name;
                 const char *assigned_reg = reg_alloc_lookup(cur_ra, var_name);
+                
+                /* Robust fallback: some parameters might not have ir_names in early passes 
+                   or if semantic analysis missed them. Try raw name too. */
+                if (!assigned_reg) assigned_reg = reg_alloc_lookup(cur_ra, orig_name);
                 
                 if (assigned_reg) {
                     if (strcmp(arg_reg, assigned_reg) != 0) {

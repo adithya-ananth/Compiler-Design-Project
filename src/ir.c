@@ -50,7 +50,7 @@ IROperand ir_op_const(int val) {
 }
 
 /* Deep-copy operand for storage in instruction (avoids double-free) */
-static IROperand op_dup(IROperand *op) {
+IROperand ir_op_copy(IROperand *op) {
     IROperand c = *op;
     if (op->name) c.name = strdup(op->name);
     return c;
@@ -75,7 +75,7 @@ IRInstr* ir_make_assign(char *dst, IROperand src, int line) {
     i->kind = IR_ASSIGN;
     i->line = line;
     i->result = dst ? strdup(dst) : NULL;
-    i->src = op_dup(&src);
+    i->src = ir_op_copy(&src);
     return i;
 }
 
@@ -84,8 +84,8 @@ IRInstr* ir_make_binop(char *dst, IROperand left, IROperand right, int op, int l
     i->kind = IR_BINOP;
     i->line = line;
     i->result = dst ? strdup(dst) : NULL;
-    i->left = op_dup(&left);
-    i->right = op_dup(&right);
+    i->left = ir_op_copy(&left);
+    i->right = ir_op_copy(&right);
     i->binop = op;
     return i;
 }
@@ -95,7 +95,7 @@ IRInstr* ir_make_unop(char *dst, IROperand src, int op, int line) {
     i->kind = IR_UNOP;
     i->line = line;
     i->result = dst ? strdup(dst) : NULL;
-    i->unop_src = op_dup(&src);
+    i->unop_src = ir_op_copy(&src);
     i->unop = op;
     return i;
 }
@@ -104,7 +104,7 @@ IRInstr* ir_make_param(IROperand op, int line) {
     IRInstr *i = calloc(1, sizeof(IRInstr));
     i->kind = IR_PARAM;
     i->line = line;
-    i->src = op_dup(&op);
+    i->src = ir_op_copy(&op);
     return i;
 }
 
@@ -133,7 +133,7 @@ IRInstr* ir_make_call_indirect(char *dst, IROperand fn_ptr, int nargs, int line)
     i->kind = IR_CALL_INDIRECT;
     i->line = line;
     i->result = dst ? strdup(dst) : NULL;
-    i->base = op_dup(&fn_ptr);
+    i->base = ir_op_copy(&fn_ptr);
     i->arg_count = nargs;
     return i;
 }
@@ -142,7 +142,7 @@ IRInstr* ir_make_return_val(IROperand op, int line) {
     IRInstr *i = calloc(1, sizeof(IRInstr));
     i->kind = IR_RETURN;
     i->line = line;
-    i->src = op_dup(&op);
+    i->src = ir_op_copy(&op);
     return i;
 }
 
@@ -175,8 +175,8 @@ IRInstr* ir_make_if(IROperand left, IROperand right, IRRelop relop, char *label,
     IRInstr *i = calloc(1, sizeof(IRInstr));
     i->kind = IR_IF;
     i->line = line;
-    i->if_left = op_dup(&left);
-    i->if_right = op_dup(&right);
+    i->if_left = ir_op_copy(&left);
+    i->if_right = ir_op_copy(&right);
     i->relop = relop;
     i->label = label ? strdup(label) : NULL;
     return i;
@@ -187,8 +187,8 @@ IRInstr* ir_make_load(char *dst, IROperand base, IROperand index, int scale, int
     i->kind = IR_LOAD;
     i->line = line;
     i->result = dst ? strdup(dst) : NULL;
-    i->base = op_dup(&base);
-    i->index = op_dup(&index);
+    i->base = ir_op_copy(&base);
+    i->index = ir_op_copy(&index);
     i->scale = scale;
     return i;
 }
@@ -197,10 +197,10 @@ IRInstr* ir_make_store(IROperand base, IROperand index, int scale, IROperand val
     IRInstr *i = calloc(1, sizeof(IRInstr));
     i->kind = IR_STORE;
     i->line = line;
-    i->base = op_dup(&base);
-    i->index = op_dup(&index);
+    i->base = ir_op_copy(&base);
+    i->index = ir_op_copy(&index);
     i->scale = scale;
-    i->store_val = op_dup(&value);
+    i->store_val = ir_op_copy(&value);
     return i;
 }
 
@@ -209,7 +209,7 @@ IRInstr* ir_make_alloca(char *dst, IROperand size, int line) {
     i->kind = IR_ALLOCA;
     i->line = line;
     i->result = dst ? strdup(dst) : NULL;
-    i->src = op_dup(&size); // size operand stored in 'src'
+    i->src = ir_op_copy(&size); // size operand stored in 'src'
     return i;
 }
 

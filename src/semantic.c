@@ -135,7 +135,8 @@ void analyze_struct_def(ASTNode *node) {
             m->struct_def = b_mem->struct_def;
             m->is_array = b_mem->is_array;
             m->array_size = b_mem->array_size;
-            m->access_modifier = b_mem->access_modifier;
+            if (node->inheritance_modifier == 1) m->access_modifier = 1;
+            else m->access_modifier = b_mem->access_modifier;
             m->struct_offset = b_mem->struct_offset;
             m->next_member = sym->members;
             sym->members = m;
@@ -148,6 +149,8 @@ void analyze_struct_def(ASTNode *node) {
             if (b_v->unmangled_name) v->unmangled_name = strdup(b_v->unmangled_name);
             v->is_virtual = 1;
             v->vtable_index = b_v->vtable_index;
+            if (node->inheritance_modifier == 1) v->access_modifier = 1;
+            else v->access_modifier = b_v->access_modifier;
             v->next_member = sym->virtual_methods;
             sym->virtual_methods = v;
             b_v = b_v->next_member;
@@ -227,10 +230,20 @@ void analyze_struct_def(ASTNode *node) {
         m->pointer_level = member->pointer_level;
         m->array_dim_count = member->array_dim_count;
         if (member->array_dim_count > 0) {
+            m->is_array = 1;
             m->array_sizes = malloc(sizeof(int) * member->array_dim_count);
             for (int i = 0; i < member->array_dim_count; i++) {
-                if (member->array_dim_exprs && member->array_dim_exprs[i] && member->array_dim_exprs[i]->type == NODE_CONST_INT) {
-                    m->array_sizes[i] = member->array_dim_exprs[i]->int_val;
+                ASTNode *expr = member->array_dim_exprs ? member->array_dim_exprs[i] : NULL;
+                if (expr && expr->type == NODE_CONST_INT) {
+                    m->array_sizes[i] = expr->int_val;
+                } else if (expr && expr->type == NODE_VAR) {
+                    /* Try to resolve constant variable (e.g. int MAX = 100) */
+                    Symbol *dim_sym = lookup_all_scopes(expr->str_val);
+                    if (dim_sym && dim_sym->const_value > 0) {
+                        m->array_sizes[i] = dim_sym->const_value;
+                    } else {
+                        m->array_sizes[i] = -1;
+                    }
                 } else {
                     m->array_sizes[i] = -1;
                 }
@@ -265,7 +278,7 @@ void analyze_struct_def(ASTNode *node) {
     sym->struct_size = offset;
 
     if (sym->virtual_methods && !has_base_vtable) {
-        int ptr_size = 4;
+        int ptr_size = 8;
         Symbol *m = sym->members;
         while (m) {
             m->struct_offset += ptr_size;
@@ -339,6 +352,7 @@ void analyze_function(ASTNode *node) {
     }
 
     enter_scope();
+    func->scope = current_scope;
     param = node->params;
     i = 0;
     current_local_offset = 0;
@@ -352,13 +366,21 @@ void analyze_function(ASTNode *node) {
             param->line_number
         );
 
+        sym->pointer_level = param->left->pointer_level;
+        if (param->left->data_type == TYPE_STRUCT && param->left->str_val) {
+            Symbol *struct_sym = lookup(param->left->str_val);
+            if (struct_sym && struct_sym->kind == SYM_STRUCT) {
+                sym->struct_def = struct_sym;
+            }
+        }
+
         if (param->int_val != 0) {
             sym->is_array = 1;
             sym->array_size = -1; 
         }
 
         sym->frame_offset = current_param_offset;
-        current_param_offset += 4; 
+        current_param_offset += 8; 
 
         if (!insert_symbol(sym))
             semantic_error(param->line_number, "Parameter redeclared");
@@ -430,7 +452,7 @@ void analyze_declaration(ASTNode *node) {
         }
         size = size * total_elements;
     } else if (sym->pointer_level > 0 || sym->is_array) {
-        size = 4;
+        size = 8;
     }
 
     size = (size + 3) & ~3;
@@ -439,11 +461,18 @@ void analyze_declaration(ASTNode *node) {
 
     if (!insert_symbol(sym))
         semantic_error(node->line_number, "Variable redeclared");
+    
+    node->sym = sym;
 
     if (node->right) {
         analyze_node(node->right);
         if (node->left->data_type != node->right->data_type)
             semantic_error(node->line_number, "Type mismatch in initialization");
+        
+        if (node->right->type == NODE_CONST_INT) {
+            sym->has_const_value = 1;
+            sym->const_value = node->right->int_val;
+        }
     }
 }
 
@@ -483,11 +512,13 @@ void analyze_variable(ASTNode *node) {
                 this_node->line_number = node->line_number;
                 
                 node->left = this_node;
+                analyze_node(this_node); /* Link 'this' symbol */
                 
                 /* Copy the member's properties */
                 node->data_type = member->type;
                 node->pointer_level = member->pointer_level;
                 node->struct_def = member->struct_def;
+                node->member_sym = member;
                 node->member_offset = member->struct_offset;
                 return;
             }
@@ -499,6 +530,7 @@ void analyze_variable(ASTNode *node) {
     }
     
     /* Standard local/global variable resolution */
+    node->sym = sym;
     node->data_type = sym->type;
     node->pointer_level = sym->pointer_level; 
     node->struct_def = sym->struct_def;       
@@ -511,34 +543,22 @@ void analyze_member_access(ASTNode *node) {
         node->data_type = TYPE_INT;
         return;
     }
-    if (node->left->type != NODE_VAR) {
+    if (node->left->type != NODE_VAR && node->left->type != NODE_MEMBER_ACCESS &&
+        node->left->type != NODE_INDEX && node->left->type != NODE_FUNC_CALL) {
         semantic_error(node->line_number, "Unsupported member access base expression");
         node->data_type = TYPE_INT;
         return;
     }
 
-    Symbol *base = lookup(node->left->str_val);
-    if (!base) {
-        semantic_error(node->line_number, "Undeclared variable in member access");
-        node->data_type = TYPE_INT;
-        return;
+    Symbol *struct_def = node->left->struct_def;
+    if (!struct_def && node->left->type == NODE_VAR) {
+        Symbol *base = lookup_all_scopes(node->left->str_val);
+        if (base) struct_def = base->struct_def;
     }
 
-    Symbol *struct_def = NULL;
-    if (node->int_val == 0) {
-        if (base->type != TYPE_STRUCT) {
-            semantic_error(node->line_number, "Member access on non-struct type");
-            node->data_type = TYPE_INT;
-            return;
-        }
-        struct_def = base->struct_def;
-    } else {
-        if (base->type != TYPE_STRUCT || base->pointer_level == 0) {
-            semantic_error(node->line_number, "Arrow access on non-struct pointer");
-            node->data_type = TYPE_INT;
-            return;
-        }
-        struct_def = base->struct_def;
+    if (node->int_val == 1) { // arrow
+        /* For arrows, we might need to check if it's a pointer, 
+           but struct_def should already be set from analyze_node(node->left) */
     }
 
     if (!struct_def) {
@@ -563,7 +583,9 @@ void analyze_member_access(ASTNode *node) {
     }
     node->data_type = member->type;
     node->pointer_level = member->pointer_level;
+    node->member_sym = member;
     node->member_offset = member->struct_offset;
+    node->struct_def = member->struct_def; // The type of the member itself
 }
 
 void analyze_assignment(ASTNode *node) {
@@ -601,6 +623,29 @@ void analyze_unary(ASTNode *node) {
     node->data_type = node->left->data_type;
 }
 
+void analyze_increment_decrement(ASTNode *node) {
+    analyze_node(node->left);
+    if (!node->left) {
+        semantic_error(node->line_number, "Invalid operand for increment/decrement");
+        node->data_type = TYPE_INT;
+        return;
+    }
+    
+    /* Operand must be a modifiable lvalue */
+    if (node->left->type != NODE_VAR && node->left->type != NODE_INDEX &&
+        node->left->type != NODE_MEMBER_ACCESS &&
+        !(node->left->type == NODE_UN_OP && node->left->int_val == '*')) {
+        semantic_error(node->line_number, "Operand of increment/decrement must be a modifiable lvalue");
+    }
+
+    if (node->left->data_type != TYPE_INT && node->left->data_type != TYPE_CHAR && node->left->pointer_level == 0) {
+        semantic_error(node->line_number, "Increment/decrement requires arithmetic or pointer type");
+    }
+
+    node->data_type = node->left->data_type;
+    node->pointer_level = node->left->pointer_level;
+}
+
 void analyze_index(ASTNode *node) {
     if (!node || node->type != NODE_INDEX) return;
     ASTNode *base = node->left;
@@ -627,6 +672,17 @@ void analyze_index(ASTNode *node) {
         }
     } else if (base->type == NODE_INDEX) {
         node->data_type = base->data_type;
+    } else if (base->type == NODE_MEMBER_ACCESS) {
+        /* Support indexing on struct members like this->arr[i] */
+        Symbol *m_sym = base->member_sym;
+        if (m_sym && (m_sym->pointer_level > 0 || m_sym->is_array)) {
+            node->data_type = m_sym->type;
+            node->pointer_level = m_sym->pointer_level > 0 ? m_sym->pointer_level - 1 : 0;
+            node->struct_def = m_sym->struct_def;
+        } else {
+            semantic_error(node->line_number, "Member used for indexing must be a pointer or array");
+            node->data_type = TYPE_INT;
+        }
     } else {
         semantic_error(node->line_number, "Invalid base expression for array indexing");
         node->data_type = TYPE_INT;
@@ -649,9 +705,18 @@ void analyze_function_call(ASTNode *node) {
     if (node->left->type == NODE_VAR) {
         sym = lookup(node->left->str_val);
     } else if (node->left->type == NODE_MEMBER_ACCESS) {
-        if (node->left->struct_def) {
+        /* The base object's struct is in node->left->left->struct_def.
+         * node->left->struct_def may be the return type's struct (wrong for void methods). */
+        ASTNode *base_obj = node->left->left;
+        Symbol *obj_struct = base_obj ? base_obj->struct_def : NULL;
+        /* For pointer bases, lookup_all_scopes to get the struct */
+        if (!obj_struct && base_obj && base_obj->type == NODE_VAR) {
+            Symbol *vsym = lookup_all_scopes(base_obj->str_val);
+            if (vsym) obj_struct = vsym->struct_def;
+        }
+        if (obj_struct) {
             char buf[512];
-            snprintf(buf, sizeof(buf), "%s_%s", node->left->struct_def->name, node->left->str_val);
+            snprintf(buf, sizeof(buf), "%s_%s", obj_struct->name, node->left->str_val);
             arg = node->right;
             while (arg) {
                 strcat(buf, "_");
@@ -661,11 +726,12 @@ void analyze_function_call(ASTNode *node) {
             sym = lookup(buf);
             if (!sym) {
                 char fallback[256];
-                snprintf(fallback, sizeof(fallback), "%s_%s", node->left->struct_def->name, node->left->str_val);
+                snprintf(fallback, sizeof(fallback), "%s_%s", obj_struct->name, node->left->str_val);
                 sym = lookup(fallback);
             }
             if (!sym) {
-                Symbol *v = node->left->struct_def->virtual_methods;
+                /* Search virtual methods in obj_struct */
+                Symbol *v = obj_struct->virtual_methods;
                 while (v) {
                     if (v->unmangled_name && strcmp(v->unmangled_name, node->left->str_val) == 0) {
                         sym = lookup(v->name);
@@ -674,6 +740,8 @@ void analyze_function_call(ASTNode *node) {
                     v = v->next_member;
                 }
             }
+            /* Ensure node->left->struct_def is the object's struct for later use */
+            node->left->struct_def = obj_struct;
         }
         
         if (sym) {
@@ -688,6 +756,7 @@ void analyze_function_call(ASTNode *node) {
             this_arg->pointer_level = obj_expr->pointer_level;
             this_arg->struct_def = obj_expr->struct_def;
             this_arg->line_number = obj_expr->line_number;
+            this_arg->sym = obj_expr->sym; 
 
             if (this_arg->data_type == TYPE_STRUCT && this_arg->pointer_level == 0) {
                 ASTNode *addr_node = create_node(NODE_UN_OP);
@@ -697,10 +766,12 @@ void analyze_function_call(ASTNode *node) {
                 addr_node->pointer_level = 1;
                 addr_node->struct_def = this_arg->struct_def;
                 addr_node->line_number = this_arg->line_number;
+                addr_node->sym = obj_expr->sym;
                 this_arg = addr_node;
             }
             this_arg->next = node->right;
             node->right = this_arg;
+            analyze_node(this_arg); // Now analyze it to ensure it's fully linked!
         }
     } else {
         semantic_error(node->line_number, "Invalid function call expression");
@@ -770,6 +841,7 @@ int analyze_while(ASTNode *node) {
 }
 
 int analyze_for(ASTNode *node) {
+    enter_scope(); /* NEW: for variables declared in for-loop header */
     if (node->init) analyze_node(node->init);
     if (node->cond){
         analyze_node(node->cond);
@@ -781,6 +853,7 @@ int analyze_for(ASTNode *node) {
     analyze_node(node->body);
     loop_context_depth--;
     break_context_depth--;
+    exit_scope(); /* NEW: close loop scope */
     return 0;
 }
 
@@ -900,6 +973,12 @@ int analyze_node(ASTNode *node) {
         case NODE_ASSIGN: analyze_assignment(node); return 0;
         case NODE_BIN_OP: analyze_binary(node); return 0;
         case NODE_UN_OP: analyze_unary(node); return 0;
+        case NODE_PRE_INC:
+        case NODE_PRE_DEC:
+        case NODE_POST_INC:
+        case NODE_POST_DEC:
+             analyze_increment_decrement(node);
+             return 0;
         case NODE_INDEX: analyze_index(node); return 0;
         case NODE_MEMBER_ACCESS: analyze_member_access(node); return 0;
         case NODE_CONST_INT: node->data_type = TYPE_INT; return 0;
@@ -926,7 +1005,7 @@ int analyze_list(ASTNode *node) {
 }
 
 int get_type_size(DataType t, int pointer_level, Symbol *struct_def) {
-    if (pointer_level > 0) return 4;
+    if (pointer_level > 0) return 8;
     if (t == TYPE_INT) return 4;
     if (t == TYPE_CHAR) return 1;
     if (t == TYPE_VOID) return 0;

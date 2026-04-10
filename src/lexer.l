@@ -112,6 +112,8 @@ STRING_LITERAL \"([^\\\n]|\\[nt'\"\\])*\"
 "scanf"     { SAVE_POS(); ADVANCE(); return T_SCANF; }
 
  /* ---------- Multi-char operators ---------- */
+"++"        { SAVE_POS(); ADVANCE(); return T_INC; }
+"--"        { SAVE_POS(); ADVANCE(); return T_DEC; }
 "=="        { SAVE_POS(); ADVANCE(); return T_EQ; }
 "!="        { SAVE_POS(); ADVANCE(); return T_NEQ; }
 "<="        { SAVE_POS(); ADVANCE(); return T_LE; }
