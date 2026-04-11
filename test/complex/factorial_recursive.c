@@ -7,7 +7,10 @@ int fact(int n) {
 }
 
 int main() {
-    int result = fact(7);
+    printf("Enter a positive integer: ");
+    int n;
+    scanf("%d", &n);
+    int result = fact(n);
     printf("Recursive Factorial is %d\n", result);
     return 0;
 }

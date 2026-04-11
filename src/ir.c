@@ -574,6 +574,7 @@ void ir_free_instr(IRInstr *instr) {
                 if (instr->index.name) free(instr->index.name);
                 break;
             case IR_STORE:
+                if (instr->base.name) free(instr->base.name);
                 if (instr->index.name) free(instr->index.name);
                 if (instr->store_val.name) free(instr->store_val.name);
                 break;

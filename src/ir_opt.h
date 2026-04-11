@@ -3,6 +3,13 @@
 
 #include "ir.h"
 
+/* Optimization level */
+typedef enum {
+    OPT_O0,
+    OPT_O1,
+    OPT_O2
+} OptLevel;
+
 /* Basic Block structure */
 typedef struct BasicBlock {
     int id;

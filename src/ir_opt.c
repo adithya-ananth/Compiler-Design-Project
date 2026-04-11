@@ -24,24 +24,31 @@ static void add_succ(BasicBlock *src, BasicBlock *dest) {
     dest->preds[dest->pred_count++] = src;
 }
 
-static BasicBlock* find_bb_by_label(BasicBlock *list, const char *label) {
-    while (list) {
-        if (list->instrs && list->instrs->kind == IR_LABEL && strcmp(list->instrs->label, label) == 0) {
-            return list;
-        }
-        list = list->next;
-    }
-    return NULL;
+#define BB_MAP_SIZE 256
+typedef struct BBMapEntry {
+    const char *label;
+    BasicBlock *bb;
+    struct BBMapEntry *next;
+} BBMapEntry;
+
+static unsigned int bb_hash(const char *str) {
+    unsigned int hash = 5381;
+    int c;
+    while ((c = *str++))
+        hash = ((hash << 5) + hash) + c;
+    return hash % BB_MAP_SIZE;
 }
 
 CFG* build_cfg(IRFunc *f) {
     if (!f || !f->instrs) return NULL;
 
     CFG *cfg = calloc(1, sizeof(CFG));
-    cfg->func_name = strdup(f->name);
+    cfg->func_name = f->name; // No strdup
 
     BasicBlock *head = NULL, *tail = NULL;
     int bb_count = 0;
+    
+    BBMapEntry *map[BB_MAP_SIZE] = {0};
 
     IRInstr *curr = f->instrs;
     while (curr) {
@@ -51,6 +58,15 @@ CFG* build_cfg(IRFunc *f) {
         if (!head) head = new_bb;
         if (tail) tail->next = new_bb;
         tail = new_bb;
+        
+        if (curr->kind == IR_LABEL && curr->label) {
+            unsigned int h = bb_hash(curr->label);
+            BBMapEntry *ent = malloc(sizeof(BBMapEntry));
+            ent->label = curr->label;
+            ent->bb = new_bb;
+            ent->next = map[h];
+            map[h] = ent;
+        }
 
         while (curr) {
             new_bb->last = curr;
@@ -72,17 +88,32 @@ CFG* build_cfg(IRFunc *f) {
     BasicBlock *bb = head;
     while (bb) {
         IRInstr *last = bb->last;
-        if (last->kind == IR_GOTO) {
-            BasicBlock *target = find_bb_by_label(head, last->label);
+        if (last->kind == IR_GOTO || last->kind == IR_IF) {
+            unsigned int h = bb_hash(last->label);
+            BBMapEntry *ent = map[h];
+            BasicBlock *target = NULL;
+            while (ent) {
+                if (strcmp(ent->label, last->label) == 0) {
+                    target = ent->bb;
+                    break;
+                }
+                ent = ent->next;
+            }
             if (target) add_succ(bb, target);
-        } else if (last->kind == IR_IF) {
-            BasicBlock *target = find_bb_by_label(head, last->label);
-            if (target) add_succ(bb, target);
-            if (bb->next) add_succ(bb, bb->next);
-        } else if (last->kind != IR_RETURN) {
+        }
+        if (last->kind == IR_IF || (last->kind != IR_GOTO && last->kind != IR_RETURN)) {
             if (bb->next) add_succ(bb, bb->next);
         }
         bb = bb->next;
+    }
+
+    for (int i = 0; i < BB_MAP_SIZE; i++) {
+        BBMapEntry *ent = map[i];
+        while (ent) {
+            BBMapEntry *tmp = ent;
+            ent = ent->next;
+            free(tmp);
+        }
     }
 
     return cfg;
@@ -99,7 +130,7 @@ void free_cfg(CFG *cfg) {
         free(bb);
         bb = next;
     }
-    free(cfg->func_name);
+    // func_name is a shared pointer now.
     free(cfg);
 }
 
@@ -180,7 +211,7 @@ static IRInstr* simplify_control_flow(IRInstr *head) {
             IRInstr *curr = *curr_ptr;
             if (curr->kind == IR_IF && curr->if_left.is_const && curr->if_right.is_const) {
                 if (eval_relop(curr->if_left.const_val, curr->if_right.const_val, curr->relop)) {
-                    char *lbl = strdup(curr->label);
+                    char *lbl = curr->label;
                     curr->if_left.name = NULL; 
                     curr->if_right.name = NULL; 
                     curr->kind = IR_GOTO;
@@ -209,7 +240,7 @@ static IRInstr* simplify_control_flow(IRInstr *head) {
                 curr->next->next && curr->next->next->kind == IR_LABEL &&
                 strcmp(curr->label, curr->next->next->label) == 0) {
 
-                char *target_L2 = strdup(curr->next->label);
+                char *target_L2 = curr->next->label;
                 IRRelop neg_rel = negate_relop(curr->relop);
                 IRInstr *goto_instr = curr->next;
                 IRInstr *label_L1 = goto_instr->next;
@@ -240,7 +271,7 @@ static IRInstr* simplify_control_flow(IRInstr *head) {
                     if (target->kind == IR_LABEL && strcmp(target->label, curr->label) == 0) {
                         if (target->next && target->next->kind == IR_GOTO) {
                             if (strcmp(curr->label, target->next->label) != 0) {
-                                curr->label = strdup(target->next->label);
+                                curr->label = target->next->label;
                                 changed = 1;
                             }
                         }
@@ -258,10 +289,16 @@ static IRInstr* simplify_control_flow(IRInstr *head) {
 /* --- Local Optimizations (BB Scope) --- */
 
 static void convert_to_assign(IRInstr *instr, IROperand new_src) {
-    IROperand safe_src = new_src;
-    if (new_src.name) safe_src.name = strdup(new_src.name);
+    /* Copy new_src before dropping old operands (new_src may alias instr->left). */
+    IROperand src_owned = ir_op_copy(&new_src);
+    if (instr->kind == IR_BINOP) {
+        ir_free_operand(&instr->left);
+        ir_free_operand(&instr->right);
+    } else if (instr->kind == IR_UNOP) {
+        ir_free_operand(&instr->unop_src);
+    }
     instr->kind = IR_ASSIGN;
-    instr->src = safe_src;
+    instr->src = src_owned;
 }
 
 static int fold_unop(IRInstr *instr) {
@@ -363,13 +400,13 @@ static int strength_reduction(IRInstr *instr) {
     if (instr->kind == IR_BINOP && instr->binop == '*') {
         if (instr->right.is_const && instr->right.const_val == 2) {
             instr->binop = '+';
-            instr->right = instr->left;
-            if (instr->left.name) instr->right.name = strdup(instr->left.name); 
+            /* Must duplicate operand strings; struct assign would alias left/right.name
+             * and ir_free_instr would double-free the same pointer. */
+            instr->right = ir_op_copy(&instr->left);
             return 1;
         } else if (instr->left.is_const && instr->left.const_val == 2) {
             instr->binop = '+';
-            instr->left = instr->right;
-            if (instr->right.name) instr->left.name = strdup(instr->right.name); 
+            instr->left = ir_op_copy(&instr->right);
             return 1;
         }
     }
@@ -381,33 +418,33 @@ typedef struct CopyVar { char *dest; char *src; struct CopyVar *next; } CopyVar;
 typedef struct ExprNode { char *res; IROperand l; IROperand r; int op; struct ExprNode *next; } ExprNode;
 
 static void add_const(ConstVar **list, char *name, int val) {
-    ConstVar *cv = malloc(sizeof(ConstVar)); cv->name = strdup(name); cv->val = val; cv->next = *list; *list = cv;
+    ConstVar *cv = malloc(sizeof(ConstVar)); cv->name = name; cv->val = val; cv->next = *list; *list = cv;
 }
 static void add_copy(CopyVar **list, char *dest, char *src) {
-    CopyVar *cv = malloc(sizeof(CopyVar)); cv->dest = strdup(dest); cv->src = strdup(src); cv->next = *list; *list = cv;
+    CopyVar *cv = malloc(sizeof(CopyVar)); cv->dest = dest; cv->src = src; cv->next = *list; *list = cv;
 }
 static void add_expr(ExprNode **list, char *res, IROperand l, IROperand r, int op) {
     ExprNode *e = malloc(sizeof(ExprNode)); 
-    e->res = strdup(res); 
-    e->l = l; if (l.name) e->l.name = strdup(l.name);
-    e->r = r; if (r.name) e->r.name = strdup(r.name);
+    e->res = res; 
+    e->l = l; if (l.name) e->l.name = l.name;
+    e->r = r; if (r.name) e->r.name = r.name;
     e->op = op; 
     e->next = *list; 
     *list = e;
 }
 
-static int get_const(ConstVar *list, char *name, int *val) {
+static int get_const(ConstVar *list, const char *name, int *val) {
     while (list) { if (strcmp(list->name, name) == 0) { *val = list->val; return 1; } list = list->next; } return 0;
 }
-static char* get_copy(CopyVar *list, char *name) {
+static char* get_copy(CopyVar *list, const char *name) {
     while (list) { if (strcmp(list->dest, name) == 0) return list->src; list = list->next; } return NULL;
 }
 
-static void remove_const(ConstVar **list, char *name) {
+static void remove_const(ConstVar **list, const char *name) {
     if (!list) return;
     ConstVar **curr = list;
     while (*curr) {
-        if (strcmp((*curr)->name, name) == 0) { ConstVar *tmp = *curr; *curr = (*curr)->next; free(tmp->name); free(tmp); return; }
+        if (strcmp((*curr)->name, name) == 0) { ConstVar *tmp = *curr; *curr = (*curr)->next; free(tmp); return; }
         curr = &((*curr)->next);
     }
 }
@@ -418,7 +455,7 @@ static void invalidate_copies_and_exprs(CopyVar **copies, ExprNode **exprs, cons
         CopyVar **c = copies;
         while (*c) {
             if (strcmp((*c)->dest, name) == 0 || strcmp((*c)->src, name) == 0) {
-                CopyVar *tmp = *c; *c = (*c)->next; free(tmp->dest); free(tmp->src); free(tmp);
+                CopyVar *tmp = *c; *c = (*c)->next; free(tmp);
             } else { c = &((*c)->next); }
         }
     }
@@ -427,9 +464,6 @@ static void invalidate_copies_and_exprs(CopyVar **copies, ExprNode **exprs, cons
         while (*e) {
             if (strcmp((*e)->res, name) == 0 || ((*e)->l.name && strcmp((*e)->l.name, name) == 0) || ((*e)->r.name && strcmp((*e)->r.name, name) == 0)) {
                 ExprNode *tmp = *e; *e = (*e)->next; 
-                free(tmp->res); 
-                if (tmp->l.name) free(tmp->l.name);
-                if (tmp->r.name) free(tmp->r.name);
                 free(tmp);
             } else { e = &((*e)->next); }
         }
@@ -437,13 +471,10 @@ static void invalidate_copies_and_exprs(CopyVar **copies, ExprNode **exprs, cons
 }
 
 static void clear_local_structs(ConstVar *c_list, CopyVar *cp_list, ExprNode *e_list) {
-    while (c_list) { ConstVar *tmp = c_list; c_list = c_list->next; free(tmp->name); free(tmp); }
-    while (cp_list) { CopyVar *tmp = cp_list; cp_list = cp_list->next; free(tmp->dest); free(tmp->src); free(tmp); }
+    while (c_list) { ConstVar *tmp = c_list; c_list = c_list->next; free(tmp); }
+    while (cp_list) { CopyVar *tmp = cp_list; cp_list = cp_list->next; free(tmp); }
     while (e_list) { 
         ExprNode *tmp = e_list; e_list = e_list->next; 
-        free(tmp->res); 
-        if (tmp->l.name) free(tmp->l.name);
-        if (tmp->r.name) free(tmp->r.name);
         free(tmp); 
     }
 }
@@ -467,10 +498,16 @@ static int propagate_constants_and_copies(IRInstr *instr, ConstVar **consts, Cop
         if (ops[i] && !ops[i]->is_const && ops[i]->name) {
             int val; char *cpy;
             if (get_const(*consts, ops[i]->name, &val)) {
-                ops[i]->is_const = 1; ops[i]->const_val = val; ops[i]->name = NULL;
+                if (ops[i]->name) free(ops[i]->name);
+                ops[i]->is_const = 1;
+                ops[i]->const_val = val;
+                ops[i]->name = NULL;
                 changed = 1;
             } else if ((cpy = get_copy(*copies, ops[i]->name)) != NULL) {
-                ops[i]->is_const = 0; ops[i]->name = strdup(cpy); ops[i]->const_val = 0;
+                if (ops[i]->name) free(ops[i]->name);
+                ops[i]->name = strdup(cpy);
+                ops[i]->is_const = 0;
+                ops[i]->const_val = 0;
                 changed = 1;
             }
         }
@@ -502,7 +539,19 @@ static int eliminate_cse(IRInstr *instr, ExprNode **exprs) {
             int right_match = (e->r.is_const && instr->right.is_const && e->r.const_val == instr->right.const_val) ||
                               (!e->r.is_const && !instr->right.is_const && e->r.name && instr->right.name && strcmp(e->r.name, instr->right.name) == 0);
             
-            if (left_match && right_match) {
+            int match = left_match && right_match;
+            if (!match) {
+                int commutative = (instr->binop == '+' || instr->binop == '*' || instr->binop == T_EQ || instr->binop == T_NEQ);
+                if (commutative) {
+                    int left_swap = (e->l.is_const && instr->right.is_const && e->l.const_val == instr->right.const_val) ||
+                                    (!e->l.is_const && !instr->right.is_const && e->l.name && instr->right.name && strcmp(e->l.name, instr->right.name) == 0);
+                    int right_swap = (e->r.is_const && instr->left.is_const && e->r.const_val == instr->left.const_val) ||
+                                     (!e->r.is_const && !instr->left.is_const && e->r.name && instr->left.name && strcmp(e->r.name, instr->left.name) == 0);
+                    if (left_swap && right_swap) match = 1;
+                }
+            }
+            
+            if (match) {
                 IROperand src; src.is_const = 0; src.name = e->res; src.const_val = 0;
                 convert_to_assign(instr, src);
                 return 1;
@@ -565,10 +614,10 @@ static void eliminate_dead_stores_local(BasicBlock *bb) {
                 continue;
             } else {
                 StoreRecord *ns = malloc(sizeof(StoreRecord));
-                ns->base = instr->base.name ? strdup(instr->base.name) : NULL;
+                ns->base = instr->base.name ? instr->base.name : NULL;
                 ns->has_const_index = instr->index.is_const;
                 ns->const_index_val = instr->index.is_const ? instr->index.const_val : 0;
-                ns->index = (instr->index.is_const || !instr->index.name) ? NULL : strdup(instr->index.name);
+                ns->index = (instr->index.is_const || !instr->index.name) ? NULL : instr->index.name;
                 ns->next = stores;
                 stores = ns;
             }
@@ -578,8 +627,6 @@ static void eliminate_dead_stores_local(BasicBlock *bb) {
                 if ((*s)->base && instr->base.name && strcmp((*s)->base, instr->base.name) == 0) {
                     StoreRecord *tmp = *s;
                     *s = (*s)->next;
-                    if (tmp->base) free(tmp->base); 
-                    if (tmp->index) free(tmp->index); 
                     free(tmp);
                 } else {
                     s = &((*s)->next);
@@ -589,8 +636,6 @@ static void eliminate_dead_stores_local(BasicBlock *bb) {
             while (stores) {
                 StoreRecord *tmp = stores;
                 stores = stores->next;
-                if (tmp->base) free(tmp->base); 
-                if (tmp->index) free(tmp->index); 
                 free(tmp);
             }
         }
@@ -614,8 +659,6 @@ static void eliminate_dead_stores_local(BasicBlock *bb) {
     free(arr);
     while (stores) {
         StoreRecord *tmp = stores; stores = stores->next;
-        if (tmp->base) free(tmp->base); 
-        if (tmp->index) free(tmp->index); 
         free(tmp);
     }
 }
@@ -654,7 +697,7 @@ static int set_contains(char **set, int count, const char *name) {
 static void set_add(char ***set, int *count, const char *name) {
     if (!name || set_contains(*set, *count, name)) return;
     *set = realloc(*set, sizeof(char*) * (*count + 1));
-    (*set)[(*count)++] = strdup(name);
+    (*set)[(*count)++] = (char*)name;
 }
 
 static int set_union(char ***dest, int *dest_count, char **src, int src_count) {
@@ -669,7 +712,6 @@ static int set_union(char ***dest, int *dest_count, char **src, int src_count) {
 }
 
 static void set_free(char **set, int count) {
-    for (int i = 0; i < count; i++) free(set[i]);
     if (set) free(set);
 }
 
@@ -766,7 +808,7 @@ void eliminate_dead_code(CFG *cfg) {
                  IRInstr *instr = arr[i];
 
                  if (instr->result && !set_contains(current_live, current_live_count, instr->result)) {
-                     if (instr->kind != IR_CALL && instr->kind != IR_CALL_INDIRECT) {
+                     if (instr->kind != IR_CALL && instr->kind != IR_CALL_INDIRECT && instr->kind != IR_STORE && instr->kind != IR_ALLOCA && instr->kind != IR_RETURN) {
                          keep[i] = 0; 
                          continue; 
                      }
@@ -775,7 +817,6 @@ void eliminate_dead_code(CFG *cfg) {
                  if (instr->result) {
                      for (int j = 0; j < current_live_count; j++) {
                          if (strcmp(current_live[j], instr->result) == 0) {
-                             free(current_live[j]);
                              current_live[j] = current_live[--current_live_count];
                              break;
                          }
@@ -921,13 +962,34 @@ void compute_dominators(CFG *cfg) {
 /* --- Loop Invariant Code Motion (LICM) --- */
 
 static int is_loop_invariant(IRInstr *instr, int *loop_blocks, int n, CFG *cfg) {
-    if (instr->kind != IR_BINOP && instr->kind != IR_UNOP && instr->kind != IR_ASSIGN) return 0;
-    
-    IROperand *ops[2] = {NULL};
+    if (instr->kind != IR_BINOP && instr->kind != IR_UNOP && instr->kind != IR_ASSIGN && instr->kind != IR_LOAD) return 0;
+
+    /* Do not hoist if another instruction in the loop defines the same result.
+     * Otherwise e.g. inner-loop "j = 0" (IR_ASSIGN with const src) is misclassified
+     * as invariant for the outer loop and hoisted above the outer header while
+     * j is still updated inside the inner loop (bubble_sort). */
+    if (instr->result) {
+        BasicBlock *bb = cfg->blocks;
+        while (bb) {
+            if (loop_blocks[bb->id]) {
+                IRInstr *check = bb->instrs;
+                while (check) {
+                    if (check != instr && check->result && strcmp(check->result, instr->result) == 0)
+                        return 0;
+                    if (check == bb->last) break;
+                    check = check->next;
+                }
+            }
+            bb = bb->next;
+        }
+    }
+
+    IROperand *ops[3] = {NULL};
     int num = 0;
     if (instr->kind == IR_ASSIGN) { ops[0] = &instr->src; num = 1; }
     else if (instr->kind == IR_BINOP) { ops[0] = &instr->left; ops[1] = &instr->right; num = 2; }
     else if (instr->kind == IR_UNOP) { ops[0] = &instr->unop_src; num = 1; }
+    else if (instr->kind == IR_LOAD) { ops[0] = &instr->base; ops[1] = &instr->index; num = 2; }
 
     for (int i = 0; i < num; i++) {
         if (!ops[i]->is_const && ops[i]->name) {
@@ -945,6 +1007,28 @@ static int is_loop_invariant(IRInstr *instr, int *loop_blocks, int n, CFG *cfg) 
             }
         }
     }
+
+    if (instr->kind == IR_LOAD) {
+        int has_store = 0;
+        BasicBlock *bb = cfg->blocks;
+        while (bb) {
+            if (loop_blocks[bb->id]) {
+                IRInstr *check = bb->instrs;
+                while (check) {
+                    if (check->kind == IR_STORE) {
+                        has_store = 1;
+                    }
+                    if (check->kind == IR_CALL || check->kind == IR_CALL_INDIRECT) {
+                        return 0;
+                    }
+                    if (check == bb->last) break;
+                    check = check->next;
+                }
+            }
+            bb = bb->next;
+        }
+        if (has_store) return 0;
+    }
     return 1;
 }
 
@@ -959,32 +1043,73 @@ void optimize_loops(CFG *cfg) {
             if (b->doms[h->id]) {
                 int *loop_blocks = calloc(cfg->block_count, sizeof(int));
                 loop_blocks[h->id] = 1;
-                loop_blocks[b->id] = 1;
-                
-                BasicBlock *members[] = {h, b};
-                for (int m = 0; m < 2; m++) {
-                    BasicBlock *lb = members[m];
-                    IRInstr **instr_ptr = &lb->instrs;
-                    while (*instr_ptr && *instr_ptr != lb->last) {
-                        IRInstr *instr = *instr_ptr;
-                        if (is_loop_invariant(instr, loop_blocks, cfg->block_count, cfg)) {
-                            BasicBlock *pre = NULL;
-                            for (int p = 0; p < h->pred_count; p++) {
-                                if (!loop_blocks[h->preds[p]->id]) {
-                                    pre = h->preds[p];
-                                    break;
+
+                BasicBlock **stack = malloc(cfg->block_count * sizeof(BasicBlock*));
+                int top = 0;
+
+                if (b != h) {
+                    loop_blocks[b->id] = 1;
+                    stack[top++] = b;
+                }
+
+                while (top > 0) {
+                    BasicBlock *m = stack[--top];
+                    for (int k = 0; k < m->pred_count; k++) {
+                        BasicBlock *p = m->preds[k];
+                        if (!loop_blocks[p->id]) {
+                            loop_blocks[p->id] = 1;
+                            stack[top++] = p;
+                        }
+                    }
+                }
+                free(stack);
+
+                BasicBlock *pre = NULL;
+                for (int p = 0; p < h->pred_count; p++) {
+                    if (!loop_blocks[h->preds[p]->id]) {
+                        pre = h->preds[p];
+                        break;
+                    }
+                }
+
+                if (pre) {
+                    BasicBlock *lb = cfg->blocks;
+                    while (lb) {
+                        if (loop_blocks[lb->id]) {
+                            IRInstr *curr_ins = lb->instrs;
+                            IRInstr *prev_ins = NULL;
+                            while (curr_ins) {
+                                IRInstr *next_ins = curr_ins->next;
+                                if (curr_ins->kind != IR_GOTO && curr_ins->kind != IR_IF && is_loop_invariant(curr_ins, loop_blocks, cfg->block_count, cfg)) {
+                                    if (prev_ins) prev_ins->next = next_ins;
+                                    else lb->instrs = next_ins;
+                                    
+                                    if (curr_ins == lb->last) lb->last = prev_ins;
+                                    
+                                    IRInstr *pcur = pre->instrs, *pprev = NULL;
+                                    while (pcur && pcur != pre->last) { pprev = pcur; pcur = pcur->next; }
+                                    if (!pcur) {
+                                        pre->instrs = curr_ins;
+                                        curr_ins->next = NULL;
+                                        pre->last = curr_ins;
+                                    } else {
+                                        if (pcur->kind == IR_GOTO || pcur->kind == IR_IF || pcur->kind == IR_RETURN) {
+                                            if (pprev) { pprev->next = curr_ins; curr_ins->next = pcur; }
+                                            else { pre->instrs = curr_ins; curr_ins->next = pcur; }
+                                        } else {
+                                            pcur->next = curr_ins;
+                                            curr_ins->next = NULL;
+                                            pre->last = curr_ins;
+                                        }
+                                    }
+                                } else {
+                                    prev_ins = curr_ins;
                                 }
-                            }
-                            if (pre) {
-                                *instr_ptr = instr->next;
-                                IRInstr *pcur = pre->instrs, *prev = NULL;
-                                while (pcur && pcur != pre->last) { prev = pcur; pcur = pcur->next; }
-                                if (prev) { prev->next = instr; instr->next = pcur; }
-                                else { pre->instrs = instr; instr->next = pcur; }
-                                continue;
+                                if (curr_ins == lb->last) break;
+                                curr_ins = next_ins;
                             }
                         }
-                        instr_ptr = &(*instr_ptr)->next;
+                        lb = lb->next;
                     }
                 }
                 free(loop_blocks);
@@ -1037,6 +1162,8 @@ static void merge_trivial_blocks(CFG *cfg) {
                     succ->last = NULL;
                     succ->pred_count = 0;
                     succ->succ_count = 0;
+                    bb->next = succ->next;
+                    free(succ);
                     changed = 1;
                 }
             }

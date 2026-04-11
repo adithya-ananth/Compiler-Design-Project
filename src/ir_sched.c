@@ -444,6 +444,8 @@ void ir_schedule_function(IRFunc *f) {
             } else {
                 new_func_head = s_head;
             }
+            /* Reconnect this scheduled block to the next block in the function. */
+            s_tail->next = next_block;
             prev_of_block = s_tail;
             
             /* Reset for next block */

@@ -74,22 +74,32 @@ const char* type_to_string(DataType t) {
 }
 
 char* get_mangled_name(const char *prefix, const char *name, ASTNode *params) {
-    char buf[512];
-    if (prefix)
-        snprintf(buf, sizeof(buf), "%s_%s", prefix, name);
-    else
-        snprintf(buf, sizeof(buf), "%s", name);
+    char buf[2048];  // Increased buffer size
+    int pos = 0;
     
+    // Initial name construction
+    if (prefix)
+        pos = snprintf(buf, sizeof(buf), "%s_%s", prefix, name);
+    else
+        pos = snprintf(buf, sizeof(buf), "%s", name);
+    
+    // Append parameter types safely
     ASTNode *p = params;
-    while (p) {
+    while (p && pos < 2000) {  // Leave margin for safety
         if (p->str_val && strcmp(p->str_val, "this") == 0) {
             p = p->next;
             continue;
         }
-        strcat(buf, "_");
-        strcat(buf, type_to_string(p->left->data_type));
+        int n = snprintf(&buf[pos], sizeof(buf) - pos, "_%s", 
+                        type_to_string(p->left->data_type));
+        if (n >= 0 && n < (int)(sizeof(buf) - pos)) {
+            pos += n;
+        } else {
+            break;  // Stop if buffer would overflow
+        }
         p = p->next;
     }
+    
     return strdup(buf);
 }
 
@@ -727,12 +737,18 @@ void analyze_function_call(ASTNode *node) {
             if (vsym) obj_struct = vsym->struct_def;
         }
         if (obj_struct) {
-            char buf[512];
-            snprintf(buf, sizeof(buf), "%s_%s", obj_struct->name, node->left->str_val);
+            char buf[2048];  // Increased size
+            int pos = snprintf(buf, sizeof(buf), "%s_%s", obj_struct->name, node->left->str_val);
+
             arg = node->right;
-            while (arg) {
-                strcat(buf, "_");
-                strcat(buf, type_to_string(arg->data_type));
+            while (arg && pos < 2000) {  // Safety margin
+                int n = snprintf(&buf[pos], sizeof(buf) - pos, "_%s",
+                                type_to_string(arg->data_type));
+                if (n >= 0 && n < (int)(sizeof(buf) - pos)) {
+                    pos += n;
+                } else {
+                    break;  // Stop if would overflow
+                }
                 arg = arg->next;
             }
             sym = lookup(buf);
